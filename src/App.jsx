@@ -11,19 +11,55 @@ import {
 } from 'lucide-react';
 
 // ============================================================================
-// KONFIGURASI SUPABASE (VERSI PRODUKSI VITE / NETLIFY)
+// KONFIGURASI SUPABASE
 // ============================================================================
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-// Menggunakan import.meta.env untuk Vite, dengan fallback hardcode ke kredensial Anda 
-// agar mencegah blank screen jika lupa setting Environment Variable di Netlify.
 const supabaseUrl = "https://rdbbauwvwsazdqdsryjd.supabase.co";
 const supabaseAnonKey = "sb_secret_VtrmkX0W8fnZL_QK7pXV4Q_6wZPzLe2";
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // ============================================================================
-// KONSTANTA & FUNGSI UTILITAS (PURE FUNCTIONS)
+// PENDETEKSI ERROR (Mencegah Layar Blank Putih)
+// ============================================================================
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+  componentDidCatch(error, errorInfo) {
+    this.setState({ error, errorInfo });
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '40px', backgroundColor: '#0f172a', color: 'white', minHeight: '100vh', fontFamily: 'sans-serif' }}>
+          <div style={{ backgroundColor: '#450a0a', border: '2px solid #ef4444', padding: '20px', borderRadius: '12px', maxWidth: '800px', margin: '0 auto' }}>
+            <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#f87171', marginBottom: '16px' }}>Terjadi Kesalahan (App Crash)</h1>
+            <p style={{ marginBottom: '16px', color: '#fca5a5' }}>Tolong fotokan layar ini dan berikan ke asisten AI Anda:</p>
+            <div style={{ backgroundColor: '#000', padding: '16px', borderRadius: '8px', overflowX: 'auto' }}>
+              <p style={{ fontWeight: 'bold', color: '#fca5a5' }}>{this.state.error && this.state.error.toString()}</p>
+              <pre style={{ marginTop: '10px', fontSize: '12px', color: '#94a3b8' }}>
+                {this.state.errorInfo && this.state.errorInfo.componentStack}
+              </pre>
+            </div>
+            <button onClick={() => window.location.reload()} style={{ marginTop: '20px', padding: '10px 20px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
+              Muat Ulang Aplikasi
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ============================================================================
+// KONSTANTA & FUNGSI UTILITAS
 // ============================================================================
 const HDD_CAPACITIES = [
   { label: '500 GB (~465 GB Usable)', value: 500 * Math.pow(1000, 3) },
@@ -71,16 +107,14 @@ const getDaysOld = (dateString) => {
 
 const isGenericCameraFolder = (name) => {
   if (!name) return false;
-  const lower = name.toLowerCase().trim();
+  const lower = name?.toLowerCase().trim();
   if (GENERIC_FOLDERS.has(lower)) return true;
-  if (lower.includes('mixer') || lower.includes('cam ') || lower.includes('cam_') || lower.includes('kamera ')) return true;
+  if (lower?.includes('mixer') || lower?.includes('cam ') || lower?.includes('cam_') || lower?.includes('kamera ')) return true;
   return /^[1-9]\d\d[a-z]+/i.test(lower);
 };
 
-// Parser Struktur Snap2HTML
 const parseHTML = (text) => {
   let parsedFiles = [];
-  
   if (text.includes('"files":[')) {
     const start = text.indexOf('var dirs = ');
     if (start !== -1) {
@@ -150,35 +184,36 @@ const parseHTML = (text) => {
 };
 
 // ============================================================================
-// KOMPONEN UTAMA APLIKASI
+// KOMPONEN UTAMA
 // ============================================================================
 export default function App() {
-  // --- STATE: AUTH & CORE ---
+  return (
+    <ErrorBoundary>
+      <MainApp />
+    </ErrorBoundary>
+  );
+}
+
+function MainApp() {
   const [user, setUser] = useState(null);
   const [userRole, setUserRole] = useState(null); 
   const [isDbLoading, setIsDbLoading] = useState(true);
-  
-  // --- STATE: UI ---
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMsg, setProcessingMsg] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0); 
-  
-  // --- STATE: DB DATA ---
   const [hdds, setHdds] = useState([]); 
   const [usersList, setUsersList] = useState([]);
   const [logs, setLogs] = useState([]);
-  
-  // --- STATE: FILES MEMORY MANAGEMENT ---
   const [isFilesSyncing, setIsFilesSyncing] = useState(true); 
   const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0 });
+  
   const loadedChunksRef = useRef(new Map()); 
   const filesRef = useRef([]);
   const [filesTrigger, setFilesTrigger] = useState(0); 
 
-  // --- SUB-STATES: FEATURES ---
   const [searchQuery, setSearchQuery] = useState('');
   const [explorerPath, setExplorerPath] = useState('');
   const deferredSearchQuery = useDeferredValue(searchQuery); 
@@ -193,14 +228,10 @@ export default function App() {
   const [duplicates, setDuplicates] = useState({ data: { groups: [], wasted: 0 }, isCalculating: false, selected: new Set() });
   const [editingCapacityId, setEditingCapacityId] = useState(null);
   
-  // Refs untuk File Input
   const fileInputRef = useRef(null);
   const replaceFileInputRef = useRef(null);
   const localFileInputRef = useRef(null);
 
-  // ============================================================================
-  // EFFECTS: SUPABASE SUBSCRIPTIONS & AUTH
-  // ============================================================================
   useEffect(() => {
     const fetchRole = async (userId) => {
       try {
@@ -212,13 +243,13 @@ export default function App() {
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
-      if (session?.user) fetchRole(session.user.id);
+      if (session?.user) fetchRole(session.user?.id);
       else setIsDbLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
       setUser(session?.user ?? null);
-      if (session?.user) fetchRole(session.user.id);
+      if (session?.user) fetchRole(session.user?.id);
       else setIsDbLoading(false);
     });
     return () => subscription.unsubscribe();
@@ -247,17 +278,16 @@ export default function App() {
     return () => { supabase.removeChannel(uSub); supabase.removeChannel(lSub); };
   }, [userRole]);
 
-  // CHUNK SYNCHRONIZER (Optimasi RAM)
   useEffect(() => {
     if (!user) return;
-    if (!hdds.length) {
+    if (!hdds || !hdds.length) {
       if (filesRef.current.length) { filesRef.current = []; loadedChunksRef.current.clear(); setFilesTrigger(p => p + 1); }
       setIsFilesSyncing(false); return;
     }
 
     let isMounted = true;
     const sync = async () => {
-      const required = new Set(hdds.flatMap(h => h.chunkIds || []));
+      const required = new Set(hdds.filter(Boolean).flatMap(h => h?.chunkIds || []));
       let hasChanges = false;
       
       for (const [id] of loadedChunksRef.current.entries()) {
@@ -289,13 +319,11 @@ export default function App() {
     return () => { isMounted = false; };
   }, [hdds, user]);
 
-  // HITUNG DUPLIKAT BACKGROUND
   useEffect(() => {
     if (isFilesSyncing || !filesRef.current.length) {
-      if (!filesRef.current.length && duplicates.data.groups.length) setDuplicates(p => ({ ...p, data: { groups: [], wasted: 0 }}));
+      if (!filesRef.current.length && duplicates?.data?.groups?.length) setDuplicates(p => ({ ...p, data: { groups: [], wasted: 0 }}));
       return;
     }
-    
     let cancelled = false;
     setDuplicates(p => ({ ...p, isCalculating: true }));
     
@@ -308,20 +336,20 @@ export default function App() {
         const end = Math.min(i + CHUNK, filesRef.current.length);
         for (let j = i; j < end; j++) {
           const f = filesRef.current[j];
-          if (f.size === 0) continue;
+          if (!f || f.size === 0) continue;
           
           let context = cache.get(f.vPath);
           if (!context) {
             const parts = (f.vPath||'').split('\\').filter(Boolean);
             context = 'root';
             for (let k = parts.length - 1; k >= 0; k--) {
-              if (!isGenericCameraFolder(parts[k])) { context = parts[k].toLowerCase().trim(); break; }
+              if (!isGenericCameraFolder(parts[k])) { context = parts[k]?.toLowerCase().trim(); break; }
             }
-            if (context === 'root' && parts.length) context = parts[0].toLowerCase().trim();
+            if (context === 'root' && parts.length) context = parts[0]?.toLowerCase().trim();
             cache.set(f.vPath, context);
           }
           
-          const key = `${f.name.toLowerCase()}_${f.size}_${context}`;
+          const key = `${f?.name?.toLowerCase()}_${f?.size}_${context}`;
           if (!map.has(key)) map.set(key, []);
           map.get(key).push(f);
         }
@@ -331,9 +359,9 @@ export default function App() {
       if (cancelled) return;
       const groups = [], wasted = [];
       for (const files of map.values()) {
-        if (files.length > 1) { groups.push(files); wasted.push(files[0].size * (files.length - 1)); }
+        if (files.length > 1) { groups.push(files); wasted.push((files[0]?.size || 0) * (files.length - 1)); }
       }
-      groups.sort((a, b) => (b[0].size * (b.length - 1)) - (a[0].size * (a.length - 1)));
+      groups.sort((a, b) => ((b[0]?.size || 0) * (b.length - 1)) - ((a[0]?.size || 0) * (a.length - 1)));
       setDuplicates(p => ({ ...p, isCalculating: false, data: { groups, wasted: wasted.reduce((a,b)=>a+b,0) } }));
     };
     calc();
@@ -344,30 +372,16 @@ export default function App() {
     e.preventDefault();
     setAuthError('');
     setIsAuthProcessing(true);
-
     try {
       if (authMode === 'login') {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: authForm.email,
-          password: authForm.password
-        });
+        const { error } = await supabase.auth.signInWithPassword({ email: authForm?.email, password: authForm?.password });
         if (error) throw error;
       } else {
-        const { data, error } = await supabase.auth.signUp({
-          email: authForm.email,
-          password: authForm.password
-        });
+        const { data, error } = await supabase.auth.signUp({ email: authForm?.email, password: authForm?.password });
         if (error) throw error;
-
-        const role = authForm.adminKey === 'BREAKER2026' ? 'admin' : 'viewer';
-        
+        const role = authForm?.adminKey === 'BREAKER2026' ? 'admin' : 'viewer';
         if (data?.user) {
-          await supabase.from('users').insert({
-            id: data.user.id,
-            email: authForm.email,
-            role: role,
-            createdAt: new Date().toISOString()
-          });
+          await supabase.from('users').insert({ id: data.user?.id, email: authForm?.email, role: role, createdAt: new Date().toISOString() });
           setUserRole(role);
         }
       }
@@ -379,55 +393,51 @@ export default function App() {
   };
 
   const handleForgotPassword = async () => {
-    if (!authForm.email) {
+    if (!authForm?.email) {
       setAuthError("Masukkan email Anda terlebih dahulu untuk memulihkan kata sandi.");
       return;
     }
-    setIsAuthProcessing(true);
-    setAuthError('');
+    setIsAuthProcessing(true); setAuthError('');
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(authForm.email);
       if (error) throw error;
       alert(`Tautan pemulihan kata sandi telah dikirim ke ${authForm.email}. Silakan periksa Kotak Masuk (Inbox) atau folder Spam Anda.`);
-    } catch (err) {
-      setAuthError("Gagal mengirim email pemulihan: " + (err.message || "Error server"));
-    } finally {
-      setIsAuthProcessing(false);
-    }
+    } catch (err) { setAuthError("Gagal mengirim email pemulihan: " + (err.message || "Error server")); } 
+    finally { setIsAuthProcessing(false); }
   };
 
-  // ============================================================================
-  // GLOBAL METRICS & COMPUTATIONS
-  // ============================================================================
   const globalStats = useMemo(() => {
-    const totalFiles = hdds.reduce((a, h) => a + (Number(h.fileCount) || 0), 0);
-    const totalSize = hdds.reduce((a, h) => a + (Number(h.totalSize) || 0), 0);
-    const cap = hdds.reduce((a, h) => a + (Number(h.capacity) || HDD_CAPACITIES[1].value), 0);
+    const totalFiles = hdds.filter(Boolean).reduce((a, h) => a + (Number(h?.fileCount) || 0), 0);
+    const totalSize = hdds.filter(Boolean).reduce((a, h) => a + (Number(h?.totalSize) || 0), 0);
+    const cap = hdds.filter(Boolean).reduce((a, h) => a + (Number(h?.capacity) || HDD_CAPACITIES[1].value), 0);
     return { files: totalFiles, size: totalSize, capacity: cap, free: Math.max(cap - totalSize, 0), percent: cap ? Math.min((totalSize/cap)*100,100) : 0 };
   }, [hdds]);
 
   const explorerData = useMemo(() => {
     if (!filesRef.current.length) return { folders: [], files: [] };
-    const query = deferredSearchQuery.trim().toLowerCase();
+    const query = deferredSearchQuery?.trim().toLowerCase();
     
     if (query) {
       const mFiles = [], mFolders = new Map();
       for (let i = 0; i < filesRef.current.length; i++) {
         const f = filesRef.current[i];
-        if (f.name.toLowerCase().includes(query) && mFiles.length < 500) mFiles.push(f);
-        if (f.vPath && mFolders.size < 200 && f.vPath.toLowerCase().includes(query)) {
+        if (!f) continue;
+        if (f?.name?.toLowerCase().includes(query) && mFiles.length < 500) mFiles.push(f);
+        if (f?.vPath && mFolders.size < 200 && f?.vPath?.toLowerCase().includes(query)) {
           const parts = f.vPath.split('\\'); let acc = '';
-          for (let p of parts) { if(!p)continue; acc = acc ? `${acc}\\${p}` : p; if(p.toLowerCase().includes(query)) mFolders.set(acc, p); }
+          for (let p of parts) { if(!p)continue; acc = acc ? `${acc}\\${p}` : p; if(p?.toLowerCase().includes(query)) mFolders.set(acc, p); }
         }
       }
       return { folders: Array.from(mFolders.entries()).map(([path, name]) => ({ path, name })), files: mFiles };
     }
 
-    const map = new Map(), mFiles = [], norm = explorerPath.replace(/\\/g, '\\').replace(/\\\\$/, '');
+    const map = new Map(), mFiles = [], norm = explorerPath?.replace(/\\/g, '\\').replace(/\\\\$/, '');
     const prefix = norm ? norm + '\\' : '';
     
     for (let i = 0; i < filesRef.current.length; i++) {
-      const f = filesRef.current[i], v = f.vPath || '';
+      const f = filesRef.current[i];
+      if (!f) continue;
+      const v = f?.vPath || '';
       if (v === norm) { if (mFiles.length < 2000) mFiles.push(f); }
       else if (!prefix || v.startsWith(prefix)) {
         const next = (norm ? v.substring(norm.length + 1) : v).split('\\')[0];
@@ -437,20 +447,17 @@ export default function App() {
     return { folders: Array.from(map.entries()).map(([name, path]) => ({ name, path })), files: mFiles };
   }, [filesTrigger, deferredSearchQuery, explorerPath]);
 
-  // ============================================================================
-  // HANDLERS: CLOUD, UPLOAD & ACTIONS
-  // ============================================================================
   const processUpload = async (filesArray, replaceExisting = null) => {
-    if (!filesArray.length) return;
+    if (!filesArray || !filesArray.length) return;
     setIsProcessing(true); setUploadProgress(0); setUploadData(p => ({...p, error: ''}));
     
     try {
       for (let fi = 0; fi < filesArray.length; fi++) {
         const file = filesArray[fi];
-        let hddName = replaceExisting ? replaceExisting.name : (uploadData.name.trim() || file.name.replace(/\.[^/.]+$/, ""));
+        let hddName = replaceExisting ? replaceExisting?.name : (uploadData?.name?.trim() || file?.name?.replace(/\.[^/.]+$/, ""));
         
         if (!replaceExisting) {
-          const exists = hdds.find(h => h.name.toLowerCase() === hddName.toLowerCase());
+          const exists = hdds.find(h => h?.name?.toLowerCase() === hddName?.toLowerCase());
           if (exists) {
             if (!window.confirm(`HDD "${exists.name}" sudah ada. Timpa (Replace)?`)) continue;
             replaceExisting = exists;
@@ -458,8 +465,8 @@ export default function App() {
         }
 
         if (replaceExisting) {
-          setProcessingMsg(`Menghapus data lama ${replaceExisting.name}...`);
-          const toDel = replaceExisting.chunkIds || [];
+          setProcessingMsg(`Menghapus data lama ${replaceExisting?.name}...`);
+          const toDel = replaceExisting?.chunkIds || [];
           for (let i = 0; i < toDel.length; i += 15) {
             const b = toDel.slice(i, i + 15);
             await supabase.from('file_chunks').delete().in('id', b);
@@ -473,10 +480,10 @@ export default function App() {
         const parsed = parseHTML(await file.text());
         if (!parsed.length) continue;
 
-        const hddId = replaceExisting ? replaceExisting.id : generateId();
+        const hddId = replaceExisting ? replaceExisting?.id : generateId();
         const newHdd = {
-          id: hddId, name: hddName, capacity: replaceExisting?.capacity || uploadData.capacity,
-          fileCount: parsed.length, totalSize: parsed.reduce((a, f) => a + f.size, 0),
+          id: hddId, name: hddName, capacity: replaceExisting?.capacity || uploadData?.capacity,
+          fileCount: parsed.length, totalSize: parsed.reduce((a, f) => a + (f?.size || 0), 0),
           dateAdded: replaceExisting?.dateAdded || new Date().toLocaleDateString(),
           lastUpdated: new Date().toISOString(), warningMuted: replaceExisting?.warningMuted || false
         };
@@ -484,7 +491,7 @@ export default function App() {
         const chunks = []; const chunkIds = [];
         for (let i = 0; i < parsed.length; i += 800) {
           const cid = generateId(); chunkIds.push(cid);
-          chunks.push({ id: cid, hddId, files: parsed.slice(i, i + 800).map(f => ({ ...f, hddId, hddName, vPath: getVirtualPath(f.path, hddName), chunkId: cid })) });
+          chunks.push({ id: cid, hddId, files: parsed.slice(i, i + 800).map(f => ({ ...f, hddId, hddName, vPath: getVirtualPath(f?.path, hddName), chunkId: cid })) });
         }
 
         let done = 0;
@@ -497,10 +504,10 @@ export default function App() {
 
         await supabase.from('hdds').upsert({ ...newHdd, chunkIds });
         await supabase.from('logs').insert({
-          id: generateId(), userId: user.id, userEmail: user.email, action: replaceExisting ? 'REPLACE_HDD' : 'UPLOAD_HDD',
+          id: generateId(), userId: user?.id, userEmail: user?.email, action: replaceExisting ? 'REPLACE_HDD' : 'UPLOAD_HDD',
           details: `${replaceExisting ? 'Memperbarui' : 'Menambah'} HDD: ${hddName} (${parsed.length} file)`, timestamp: new Date().toISOString()
         });
-        setUploadProgress(100); replaceExisting = null; // reset for next file
+        setUploadProgress(100); replaceExisting = null;
       }
       setUploadData(p => ({...p, name: ''}));
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -520,7 +527,7 @@ export default function App() {
         .filter(r => r && r.length > 2 && !['nama project', 'project'].includes(r.toLowerCase()) && !r.toLowerCase().endsWith(' - breaker'));
 
       const map = new Map();
-      filesRef.current.forEach(f => { if (f.vPath) map.set(f.vPath.toLowerCase(), f.vPath); });
+      filesRef.current.forEach(f => { if (f?.vPath) map.set(f.vPath.toLowerCase(), f.vPath); });
       const allPaths = Array.from(map.entries());
 
       const data = rows.map(p => {
@@ -529,7 +536,7 @@ export default function App() {
         const matches = allPaths.filter(([lp]) => lp.includes(lower)).sort((a,b) => a[0].length - b[0].length);
         return { name: p, category: cat, isFound: matches.length > 0, foundPath: matches[0]?.[1] || null };
       });
-      setAuditState({ data, isAuditing: false, filter: auditState.filter });
+      setAuditState({ data, isAuditing: false, filter: auditState?.filter });
     } catch (e) { alert(e.message); setAuditState(p => ({ ...p, isAuditing: false })); }
   };
 
@@ -538,34 +545,35 @@ export default function App() {
     setIsProcessing(true); setProcessingMsg("Mencocokkan file...");
     try {
       const parsed = parseHTML(await file.text());
-      setLocalScan({ files: parsed, name: file.name });
+      setLocalScan({ files: parsed, name: file?.name });
     } catch (e) { alert("File tidak valid."); }
     finally { setIsProcessing(false); if (localFileInputRef.current) localFileInputRef.current.value = ''; }
   };
 
   const executeDeleteDuplicates = async () => {
-    if (!window.confirm(`Hapus ${duplicates.selected.size} file ini secara permanen dari Cloud?`)) return;
+    if (!window.confirm(`Hapus ${duplicates?.selected?.size || 0} file ini secara permanen dari Cloud?`)) return;
     setIsProcessing(true); setProcessingMsg("Menghapus duplikat dari server...");
     try {
-      const toDel = filesRef.current.filter(f => duplicates.selected.has(f.id));
+      const toDel = filesRef.current.filter(f => duplicates?.selected?.has(f?.id));
       const chunksMap = new Map();
-      toDel.forEach(f => { if (!chunksMap.has(f.chunkId)) chunksMap.set(f.chunkId, new Set()); chunksMap.get(f.chunkId).add(f.id); });
+      toDel.forEach(f => { if (!f) return; if (!chunksMap.has(f.chunkId)) chunksMap.set(f.chunkId, new Set()); chunksMap.get(f.chunkId).add(f.id); });
 
       let done = 0;
       for (const [cId, ids] of chunksMap.entries()) {
-        const fresh = filesRef.current.filter(f => f.chunkId === cId && !ids.has(f.id));
+        const fresh = filesRef.current.filter(f => f?.chunkId === cId && !ids.has(f?.id));
         loadedChunksRef.current.set(cId, fresh);
         await supabase.from('file_chunks').update({ files: fresh }).eq('id', cId);
         setUploadProgress(Math.round((++done / chunksMap.size) * 100));
       }
 
-      const affectedHdds = new Set(toDel.map(f => f.hddId));
+      const affectedHdds = new Set(toDel.map(f => f?.hddId));
       for (const hId of affectedHdds) {
-        const fresh = filesRef.current.filter(f => f.hddId === hId && !duplicates.selected.has(f.id));
-        await supabase.from('hdds').update({ fileCount: fresh.length, totalSize: fresh.reduce((a,f)=>a+f.size,0) }).eq('id', hId);
+        if (!hId) continue;
+        const fresh = filesRef.current.filter(f => f?.hddId === hId && !duplicates?.selected?.has(f?.id));
+        await supabase.from('hdds').update({ fileCount: fresh.length, totalSize: fresh.reduce((a,f)=>a+(f?.size || 0),0) }).eq('id', hId);
       }
 
-      await supabase.from('logs').insert({ id: generateId(), userId: user.id, userEmail: user.email, action: 'DELETE_DUPLICATES', details: `Menghapus ${toDel.length} duplikat`, timestamp: new Date().toISOString() });
+      await supabase.from('logs').insert({ id: generateId(), userId: user?.id, userEmail: user?.email, action: 'DELETE_DUPLICATES', details: `Menghapus ${toDel.length} duplikat`, timestamp: new Date().toISOString() });
       
       filesRef.current = Array.from(loadedChunksRef.current.values()).flat();
       setFilesTrigger(p => p + 1); setDuplicates(p => ({ ...p, selected: new Set() }));
@@ -576,16 +584,16 @@ export default function App() {
 
   const toggleHddWarning = async (hdd) => {
     try {
-      const newMutedState = !hdd.warningMuted;
-      await supabase.from('hdds').update({ warningMuted: newMutedState }).eq('id', hdd.id);
-      await supabase.from('logs').insert({ id: generateId(), userId: user.id, userEmail: user.email, action: newMutedState ? 'MUTE_WARNING' : 'UNMUTE_WARNING', details: `${newMutedState ? 'Mematikan' : 'Menyalakan'} peringatan usang untuk HDD: ${hdd.name}`, timestamp: new Date().toISOString() });
+      const newMutedState = !hdd?.warningMuted;
+      await supabase.from('hdds').update({ warningMuted: newMutedState }).eq('id', hdd?.id);
+      await supabase.from('logs').insert({ id: generateId(), userId: user?.id, userEmail: user?.email, action: newMutedState ? 'MUTE_WARNING' : 'UNMUTE_WARNING', details: `${newMutedState ? 'Mematikan' : 'Menyalakan'} peringatan usang untuk HDD: ${hdd?.name}`, timestamp: new Date().toISOString() });
     } catch (err) { alert("Gagal mengubah status peringatan."); }
   };
 
   const updateHddCapacity = async (hddId, newCapacity) => {
     try {
       await supabase.from('hdds').update({ capacity: Number(newCapacity) }).eq('id', hddId);
-      await supabase.from('logs').insert({ id: generateId(), userId: user.id, userEmail: user.email, action: 'UPDATE_CAPACITY', details: `Mengubah limit ukuran kapasitas fisik HDD.`, timestamp: new Date().toISOString() });
+      await supabase.from('logs').insert({ id: generateId(), userId: user?.id, userEmail: user?.email, action: 'UPDATE_CAPACITY', details: `Mengubah limit ukuran kapasitas fisik HDD.`, timestamp: new Date().toISOString() });
     } catch (err) { alert("Gagal mengupdate kapasitas HDD."); } 
     finally { setEditingCapacityId(null); }
   };
@@ -594,7 +602,7 @@ export default function App() {
     if(!window.confirm("Apakah Anda yakin ingin menghapus HDD ini secara permanen dari CLOUD?")) return;
     setIsProcessing(true); setProcessingMsg("Menghapus dari server..."); setUploadProgress(0);
     try {
-      const hddToDelete = hdds.find(h => h.id === hddId);
+      const hddToDelete = hdds.find(h => h?.id === hddId);
       const chunkIdsToDelete = hddToDelete?.chunkIds || [];
       
       let processed = 0;
@@ -607,71 +615,72 @@ export default function App() {
       }
       
       await supabase.from('hdds').delete().eq('id', hddId);
-      await supabase.from('logs').insert({ id: generateId(), userId: user.id, userEmail: user.email, action: 'DELETE_HDD', details: `Menghapus HDD: ${hddToDelete?.name}`, timestamp: new Date().toISOString() });
+      await supabase.from('logs').insert({ id: generateId(), userId: user?.id, userEmail: user?.email, action: 'DELETE_HDD', details: `Menghapus HDD: ${hddToDelete?.name}`, timestamp: new Date().toISOString() });
       
       filesRef.current = Array.from(loadedChunksRef.current.values()).flat();
       setFilesTrigger(p => p + 1); setUploadProgress(100);
-    } catch (error) { alert(`Gagal menghapus HDD: ${error.message}`); } 
+    } catch (error) { alert(`Gagal menghapus HDD: ${error?.message}`); } 
     finally { setIsProcessing(false); setProcessingMsg(''); setUploadProgress(0); }
   };
 
   const exportHddToHTML = (hdd) => {
-    const hddFiles = filesRef.current.filter(f => f.hddId === hdd.id);
+    const hddFiles = filesRef.current.filter(f => f?.hddId === hdd?.id);
     const dirsMap = {};
     hddFiles.forEach(f => {
-      const path = f.path.replace(/\\/g, '\\');
+      if (!f) return;
+      const path = (f?.path || '').replace(/\\/g, '\\');
       if(!dirsMap[path]) dirsMap[path] = [];
-      dirsMap[path].push({ n: f.name, s: f.size, d: f.date });
+      dirsMap[path].push({ n: f?.name, s: f?.size, d: f?.date });
     });
     const dirsArr = Object.keys(dirsMap).map(path => ({ path, files: dirsMap[path] }));
     const jsonStr = JSON.stringify(dirsArr);
     
-    const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Breaker HDD Manager Export - ${hdd.name}</title><style>body{font-family:sans-serif; padding:40px; background:#f0f2f5;} .box{background:#fff; padding:20px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1);}</style></head><body><div class="box"><h2>Database HDD: ${hdd.name}</h2><p>File ini telah diperbarui dan diekspor oleh Breaker HDD Manager.</p></div><script>var dirs = ${jsonStr};</script></body></html>`;
+    const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Breaker HDD Manager Export - ${hdd?.name}</title><style>body{font-family:sans-serif; padding:40px; background:#f0f2f5;} .box{background:#fff; padding:20px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1);}</style></head><body><div class="box"><h2>Database HDD: ${hdd?.name}</h2><p>File ini telah diperbarui dan diekspor oleh Breaker HDD Manager.</p></div><script>var dirs = ${jsonStr};</script></body></html>`;
     const blob = new Blob([htmlContent], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `Update_${hdd.name.replace(/\s+/g, '_')}.html`;
+    const a = document.createElement('a'); a.href = url; a.download = `Update_${(hdd?.name || 'File').replace(/\s+/g, '_')}.html`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   };
 
   const updateUserRole = async (targetUid, targetEmail, newRole) => {
     if (userRole !== 'admin') return;
-    if (!window.confirm(`Ubah role untuk ${targetEmail} menjadi ${newRole.toUpperCase()}?`)) return;
+    if (!window.confirm(`Ubah role untuk ${targetEmail} menjadi ${newRole?.toUpperCase()}?`)) return;
     try {
       await supabase.from('users').update({ role: newRole }).eq('id', targetUid);
-      await supabase.from('logs').insert({ id: generateId(), userId: user.id, userEmail: user.email, action: 'CHANGE_ROLE', details: `Mengubah akses ${targetEmail} menjadi ${newRole}`, timestamp: new Date().toISOString() });
+      await supabase.from('logs').insert({ id: generateId(), userId: user?.id, userEmail: user?.email, action: 'CHANGE_ROLE', details: `Mengubah akses ${targetEmail} menjadi ${newRole}`, timestamp: new Date().toISOString() });
       alert('Role berhasil diperbarui!');
     } catch (err) { alert('Terjadi kesalahan saat mengubah role.'); }
   };
 
   const deleteUserAccount = async (targetUid, targetEmail) => {
     if (userRole !== 'admin') return;
-    if (targetUid === user.id) { alert("Anda tidak dapat menghapus akun Anda sendiri!"); return; }
+    if (targetUid === user?.id) { alert("Anda tidak dapat menghapus akun Anda sendiri!"); return; }
     if (!window.confirm(`PERINGATAN: Apakah Anda yakin ingin mencabut akses sistem untuk ${targetEmail}?`)) return;
     try {
       await supabase.from('users').delete().eq('id', targetUid);
-      await supabase.from('logs').insert({ id: generateId(), userId: user.id, userEmail: user.email, action: 'DELETE_USER', details: `Menghapus akses pengguna: ${targetEmail}`, timestamp: new Date().toISOString() });
+      await supabase.from('logs').insert({ id: generateId(), userId: user?.id, userEmail: user?.email, action: 'DELETE_USER', details: `Menghapus akses pengguna: ${targetEmail}`, timestamp: new Date().toISOString() });
       alert('Akses pengguna berhasil dicabut dari sistem!');
     } catch (err) { alert('Terjadi kesalahan saat menghapus pengguna.'); }
   };
 
   const smartSelectDuplicates = () => {
-    const newSet = new Set(duplicates.selected);
-    duplicates.data.groups.forEach(group => { for (let i = 1; i < group.length; i++) newSet.add(group[i].id); });
+    const newSet = new Set(duplicates?.selected);
+    duplicates?.data?.groups?.forEach(group => { if(group) { for (let i = 1; i < group.length; i++) newSet.add(group[i]?.id); }});
     setDuplicates(p => ({ ...p, selected: newSet }));
   };
 
   const generateBatScript = () => {
-    if (duplicates.selected.size === 0) return;
+    if (!duplicates?.selected?.size) return;
     let scriptContent = `@echo off\r\necho Peringatan: Script ini akan menghapus ${duplicates.selected.size} file.\r\npause\r\n\r\n`;
-    const filesToDelete = filesRef.current.filter(f => duplicates.selected.has(f.id));
+    const filesToDelete = filesRef.current.filter(f => duplicates.selected.has(f?.id));
     const byHdd = {};
-    filesToDelete.forEach(f => { if(!byHdd[f.hddName]) byHdd[f.hddName] = []; byHdd[f.hddName].push(f); });
+    filesToDelete.forEach(f => { if(!f) return; if(!byHdd[f.hddName]) byHdd[f.hddName] = []; byHdd[f.hddName].push(f); });
 
     Object.keys(byHdd).forEach(hdd => {
       scriptContent += `echo Menghapus dari HDD: ${hdd}...\r\n`;
       byHdd[hdd].forEach(file => {
-        let fullPath = file.path.endsWith('\\') || file.path.endsWith('/') ? `${file.path}${file.name}` : `${file.path}\\${file.name}`;
-        scriptContent += `del /F /Q "${fullPath.replace(/\//g, '\\')}"\r\n`;
+        let fullPath = file?.path?.endsWith('\\') || file?.path?.endsWith('/') ? `${file.path}${file.name}` : `${file?.path}\\${file?.name}`;
+        scriptContent += `del /F /Q "${(fullPath || '').replace(/\//g, '\\')}"\r\n`;
       });
       scriptContent += `echo.\r\n`;
     });
@@ -683,35 +692,62 @@ export default function App() {
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   };
 
-  // Local Check Helpers
-  const getDuplicateKey = (f) => `${f.name.toLowerCase()}_${f.size}`;
+  const getDuplicateKey = (f) => `${f?.name?.toLowerCase()}_${f?.size}`;
   const localCheckResults = useMemo(() => {
-    if (!localScan.files) return null;
+    if (!localScan?.files) return null;
     const cloudMap = new Map();
-    filesRef.current.forEach(f => { if (f.size === 0) return; const key = getDuplicateKey(f); if (!cloudMap.has(key)) cloudMap.set(key, []); cloudMap.get(key).push(f); });
+    filesRef.current.forEach(f => { if (!f || f.size === 0) return; const key = getDuplicateKey(f); if (!cloudMap.has(key)) cloudMap.set(key, []); cloudMap.get(key).push(f); });
 
     const dups = [], uniq = []; let wasted = 0;
     localScan.files.forEach(lf => {
-      if (lf.size === 0) return;
+      if (!lf || lf.size === 0) return;
       const key = getDuplicateKey(lf);
       if (cloudMap.has(key)) { dups.push({ local: lf, cloud: cloudMap.get(key) }); wasted += lf.size; } 
       else { uniq.push(lf); }
     });
-    dups.sort((a, b) => b.local.size - a.local.size);
+    dups.sort((a, b) => (b?.local?.size || 0) - (a?.local?.size || 0));
     return { duplicates: dups, unique: uniq, wastedSpace: wasted };
-  }, [localScan.files, filesTrigger]);
+  }, [localScan?.files, filesTrigger]);
 
   const displayedAudit = useMemo(() => {
-    if (!auditState.data) return null;
-    const filtered = auditState.filter === 'All' ? auditState.data : auditState.data.filter(d => d.category === auditState.filter);
-    const naturalSort = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
-    return { missing: filtered.filter(d => !d.isFound).sort(naturalSort), found: filtered.filter(d => d.isFound).sort(naturalSort) };
-  }, [auditState.data, auditState.filter]);
+    if (!auditState?.data) return null;
+    const filtered = auditState.filter === 'All' ? auditState.data : auditState.data.filter(d => d?.category === auditState.filter);
+    const naturalSort = (a, b) => (a?.name || '').localeCompare(b?.name || '', undefined, { numeric: true, sensitivity: 'base' });
+    return { missing: filtered.filter(d => !d?.isFound).sort(naturalSort), found: filtered.filter(d => d?.isFound).sort(naturalSort) };
+  }, [auditState?.data, auditState?.filter]);
 
+  if (isDbLoading) {
+    return (
+      <div className="flex h-screen w-full bg-slate-900 text-white items-center justify-center flex-col p-4 text-center">
+        <Loader2 className="animate-spin text-indigo-500 mb-4" size={64} />
+        <h2 className="text-xl md:text-2xl font-bold tracking-widest text-indigo-100">MEMUAT MODUL...</h2>
+        <p className="text-slate-500 text-xs md:text-sm mt-2 font-mono">Menyiapkan koneksi Supabase</p>
+      </div>
+    );
+  }
 
-  // ============================================================================
-  // RENDERERS UNTUK HALAMAN (TABS)
-  // ============================================================================
+  if (!user) {
+    return (
+      <div className="flex h-screen bg-slate-900 text-white items-center justify-center p-4">
+        <div className="bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl max-w-md w-full">
+          <div className="text-center mb-8"><h1 className="text-2xl font-black tracking-widest uppercase">Breaker Cloud 2.0</h1><p className="text-slate-400 text-sm mt-2">Masuk ke Ekosistem Supabase</p></div>
+          {authError && <div className="bg-red-500/20 text-red-400 p-3 rounded-lg mb-6 text-sm flex items-center gap-2"><AlertCircle size={16} /> {authError}</div>}
+          <form onSubmit={handleAuth} className="space-y-4">
+            <div><label className="block text-xs font-bold text-slate-400 mb-2">Email</label><div className="relative"><User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" /><input type="email" required value={authForm?.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 pl-10 pr-4 outline-none focus:border-indigo-500 text-sm" /></div></div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-2">Password</label>
+              <div className="relative"><Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" /><input type="password" required minLength={6} value={authForm?.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 pl-10 pr-4 outline-none focus:border-indigo-500 text-sm" /></div>
+              {authMode === 'login' && <div className="text-right mt-2"><button type="button" onClick={handleForgotPassword} className="text-[11px] text-indigo-400 hover:text-indigo-300">Lupa Kata Sandi?</button></div>}
+            </div>
+            {authMode === 'register' && <div><label className="block text-xs font-bold text-indigo-400 mb-2">Admin Key (Opsional)</label><div className="relative"><Key size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-500" /><input type="password" value={authForm?.adminKey} onChange={e => setAuthForm({...authForm, adminKey: e.target.value})} className="w-full bg-indigo-900/20 border border-indigo-500/30 rounded-xl py-3 pl-10 pr-4 outline-none focus:border-indigo-500 text-sm" /></div></div>}
+            <button type="submit" disabled={isAuthProcessing} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl flex justify-center gap-2">{isAuthProcessing && <Loader2 size={18} className="animate-spin" />} {authMode === 'login' ? 'Masuk' : 'Daftar'}</button>
+          </form>
+          <div className="mt-6 text-center"><button onClick={() => {setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError('')}} className="text-sm text-slate-400 hover:text-white">{authMode === 'login' ? 'Belum punya akun? Daftar.' : 'Sudah punya akun? Masuk.'}</button></div>
+        </div>
+      </div>
+    );
+  }
+
   const renderDashboard = () => (
     <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4">
       <header><h2 className="text-3xl font-bold text-white">Dashboard Cloud</h2><p className="text-slate-400">Ringkasan analitik seluruh aset HDD Studio.</p></header>
@@ -723,12 +759,12 @@ export default function App() {
             <p className="text-xs text-slate-400 mt-1">{hdds.length} Hard Disk terhubung ke Cloud</p>
           </div>
           <div className="text-right">
-            <p className="font-bold text-white">{formatBytes(globalStats.size)} <span className="text-slate-500 font-medium text-sm">/ {formatBytes(globalStats.capacity)}</span></p>
-            <p className="text-xs text-slate-400">Sisa Kosong: <span className="text-emerald-400 font-bold">{formatBytes(globalStats.free)}</span></p>
+            <p className="font-bold text-white">{formatBytes(globalStats?.size)} <span className="text-slate-500 font-medium text-sm">/ {formatBytes(globalStats?.capacity)}</span></p>
+            <p className="text-xs text-slate-400">Sisa Kosong: <span className="text-emerald-400 font-bold">{formatBytes(globalStats?.free)}</span></p>
           </div>
         </div>
         <div className="w-full bg-slate-950 h-3 rounded-full overflow-hidden shadow-inner border border-slate-800">
-          <div className={`h-full transition-all duration-1000 ${globalStats.percent > 90 ? 'bg-red-500' : globalStats.percent > 75 ? 'bg-orange-500' : 'bg-indigo-500'}`} style={{width: `${globalStats.percent}%`}} />
+          <div className={`h-full transition-all duration-1000 ${(globalStats?.percent || 0) > 90 ? 'bg-red-500' : (globalStats?.percent || 0) > 75 ? 'bg-orange-500' : 'bg-indigo-500'}`} style={{width: `${globalStats?.percent || 0}%`}} />
         </div>
       </div>
 
@@ -739,12 +775,12 @@ export default function App() {
         </div>
         <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-lg">
           <div className="flex items-center gap-3 text-emerald-400 mb-3"><Files size={24} /><h3 className="font-semibold text-slate-200">Total File</h3></div>
-          <p className="text-4xl font-bold text-white">{globalStats.files.toLocaleString()}</p>
+          <p className="text-4xl font-bold text-white">{(globalStats?.files || 0).toLocaleString()}</p>
         </div>
         <div className="bg-slate-800 p-6 rounded-2xl border border-red-900/50 shadow-lg relative overflow-hidden">
           <div className="absolute -top-10 -right-10 w-32 h-32 bg-red-500/20 rounded-full blur-3xl"></div>
           <div className="flex items-center gap-3 text-red-400 mb-3 relative z-10"><Trash2 size={24} /><h3 className="font-semibold text-slate-200">Ruang Terbuang</h3></div>
-          <p className="text-4xl font-bold text-red-400 relative z-10">{isFilesSyncing ? <Loader2 size={28} className="animate-spin" /> : formatBytes(duplicates.data.wasted)}</p>
+          <p className="text-4xl font-bold text-red-400 relative z-10">{isFilesSyncing ? <Loader2 size={28} className="animate-spin" /> : formatBytes(duplicates?.data?.wasted)}</p>
         </div>
       </div>
       {hdds.length === 0 && !isFilesSyncing && (
@@ -764,11 +800,11 @@ export default function App() {
       <div className="flex-1 bg-slate-800 border border-slate-700 rounded-2xl flex flex-col overflow-hidden shadow-xl">
         <div className="bg-slate-900/50 border-b border-slate-700 p-4 flex flex-col md:flex-row items-center gap-4">
           <div className="flex w-full md:w-auto items-center gap-2 overflow-hidden">
-            <button onClick={() => setExplorerPath(explorerPath.split('\\').slice(0, -1).join('\\'))} disabled={!explorerPath || !!searchQuery} className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-600 disabled:opacity-50"><ArrowLeft size={16} /></button>
+            <button onClick={() => setExplorerPath((explorerPath || '').split('\\').slice(0, -1).join('\\'))} disabled={!explorerPath || !!searchQuery} className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-600 disabled:opacity-50"><ArrowLeft size={16} /></button>
             <div className="flex-1 bg-slate-800 border border-slate-600 rounded-lg flex items-center px-3 py-2 gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide">
               {searchQuery ? <span className="text-sm text-slate-400 italic">Pencarian: "{searchQuery}"</span> : (
                 <><button onClick={() => setExplorerPath('')} className="text-slate-400 hover:text-white"><Home size={16} /></button><span className="text-slate-600">/</span>
-                  {explorerPath.split('\\').filter(Boolean).map((p, i, a) => (
+                  {(explorerPath || '').split('\\').filter(Boolean).map((p, i, a) => (
                     <React.Fragment key={i}><button onClick={() => setExplorerPath(a.slice(0, i+1).join('\\'))} className="text-sm font-medium text-indigo-400 hover:text-indigo-300">{p}</button>{i < a.length -1 && <span className="text-slate-600">\</span>}</React.Fragment>
                   ))}
                 </>
@@ -779,10 +815,10 @@ export default function App() {
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           {isFilesSyncing ? <div className="h-full flex flex-col items-center justify-center text-indigo-400"><Loader2 size={48} className="animate-spin mb-4" /><p>Sinkronisasi Server...</p></div> : 
-           !explorerData.folders.length && !explorerData.files.length ? <div className="h-full flex flex-col items-center justify-center text-slate-500"><FolderIcon size={48} className="mb-4 opacity-50" /><p>Kosong</p></div> :
+           !explorerData?.folders?.length && !explorerData?.files?.length ? <div className="h-full flex flex-col items-center justify-center text-slate-500"><FolderIcon size={48} className="mb-4 opacity-50" /><p>Kosong</p></div> :
            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 content-start">
-             {explorerData.folders.map(f => <div key={`f-${f.path}`} onClick={() => { setExplorerPath(f.path); setSearchQuery(''); }} className="flex items-center gap-3 p-3 bg-slate-800 border border-slate-700 hover:border-indigo-500 rounded-xl cursor-pointer group"><FolderIcon size={24} className="text-indigo-400 group-hover:scale-110 transition-transform" /><div className="flex-1 min-w-0"><span className="text-sm font-medium text-slate-200 truncate block">{f.name}</span></div></div>)}
-             {explorerData.files.map(f => <div key={f.id} className="flex items-center gap-3 p-3 bg-slate-800/50 border border-slate-700/50 rounded-xl"><FileIcon size={24} className="text-slate-500 shrink-0" /><div className="flex-1 min-w-0"><div className="flex items-center gap-2"><p className="text-sm font-medium text-slate-300 truncate">{f.name}</p><span className="text-[9px] bg-indigo-500/10 text-indigo-400 px-1.5 rounded">{f.hddName}</span></div><p className="text-[11px] text-slate-500">{formatBytes(f.size)}</p></div>{searchQuery && <button onClick={() => { setExplorerPath(f.vPath); setSearchQuery(''); }} className="p-2 text-slate-400 hover:text-indigo-400"><FolderOpen size={18} /></button>}</div>)}
+             {explorerData?.folders?.map(f => <div key={`f-${f?.path}`} onClick={() => { setExplorerPath(f?.path); setSearchQuery(''); }} className="flex items-center gap-3 p-3 bg-slate-800 border border-slate-700 hover:border-indigo-500 rounded-xl cursor-pointer group"><FolderIcon size={24} className="text-indigo-400 group-hover:scale-110 transition-transform" /><div className="flex-1 min-w-0"><span className="text-sm font-medium text-slate-200 truncate block">{f?.name}</span></div></div>)}
+             {explorerData?.files?.map(f => <div key={f?.id} className="flex items-center gap-3 p-3 bg-slate-800/50 border border-slate-700/50 rounded-xl"><FileIcon size={24} className="text-slate-500 shrink-0" /><div className="flex-1 min-w-0"><div className="flex items-center gap-2"><p className="text-sm font-medium text-slate-300 truncate">{f?.name}</p><span className="text-[9px] bg-indigo-500/10 text-indigo-400 px-1.5 rounded">{f?.hddName}</span></div><p className="text-[11px] text-slate-500">{formatBytes(f?.size)}</p></div>{searchQuery && <button onClick={() => { setExplorerPath(f?.vPath); setSearchQuery(''); }} className="p-2 text-slate-400 hover:text-indigo-400"><FolderOpen size={18} /></button>}</div>)}
            </div>
           }
         </div>
@@ -796,41 +832,41 @@ export default function App() {
       <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-xl">
         <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><UploadCloud className="text-indigo-400"/> Upload File Snap2HTML</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <div><label className="block text-sm text-slate-400 mb-1">Label (Opsional)</label><input type="text" value={uploadData.name} onChange={e => setUploadData(p => ({...p, name: e.target.value}))} placeholder="Otomatis dari nama file..." className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white" /></div>
-          <div><label className="block text-sm text-slate-400 mb-1">Kapasitas Fisik</label><select value={uploadData.capacity} onChange={e => setUploadData(p => ({...p, capacity: Number(e.target.value)}))} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white">{HDD_CAPACITIES.map(c => <option key={c.label} value={c.value}>{c.label}</option>)}</select></div>
+          <div><label className="block text-sm text-slate-400 mb-1">Label (Opsional)</label><input type="text" value={uploadData?.name} onChange={e => setUploadData(p => ({...p, name: e.target.value}))} placeholder="Otomatis dari nama file..." className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white" /></div>
+          <div><label className="block text-sm text-slate-400 mb-1">Kapasitas Fisik</label><select value={uploadData?.capacity} onChange={e => setUploadData(p => ({...p, capacity: Number(e.target.value)}))} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white">{HDD_CAPACITIES.map(c => <option key={c.label} value={c.value}>{c.label}</option>)}</select></div>
         </div>
         <div className="border-2 border-dashed border-slate-600 hover:border-indigo-500 bg-slate-900/50 rounded-xl p-8 text-center cursor-pointer group" onClick={() => fileInputRef.current?.click()}>
           <input type="file" multiple accept=".html,.htm" className="hidden" ref={fileInputRef} onChange={e => processUpload(Array.from(e.target.files))} />
           <Cloud size={40} className="mx-auto text-slate-500 group-hover:text-indigo-400 mb-3" />
           <p className="text-slate-300 font-medium">Klik untuk memilih file HTML (Bisa Multi-upload)</p>
         </div>
-        {uploadData.error && <div className="mt-4 bg-red-900/30 p-3 text-red-400 text-sm rounded-lg flex items-center gap-2"><AlertCircle size={16}/> {uploadData.error}</div>}
+        {uploadData?.error && <div className="mt-4 bg-red-900/30 p-3 text-red-400 text-sm rounded-lg flex items-center gap-2"><AlertCircle size={16}/> {uploadData.error}</div>}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <input type="file" accept=".html,.htm" className="hidden" ref={replaceFileInputRef} onChange={e => processUpload([e.target.files[0]], replacingHdd)} />
-        {hdds.map(hdd => {
-          const daysOld = getDaysOld(hdd.lastUpdated || hdd.dateAdded);
-          const usedP = Math.min((hdd.totalSize / (hdd.capacity||1)) * 100, 100);
+        {hdds.filter(Boolean).map(hdd => {
+          const daysOld = getDaysOld(hdd?.lastUpdated || hdd?.dateAdded);
+          const usedP = Math.min(((hdd?.totalSize || 0) / (hdd?.capacity||1)) * 100, 100);
           return (
-            <div key={hdd.id} className="bg-slate-800 border border-slate-700 p-5 rounded-xl group hover:border-slate-500">
+            <div key={hdd?.id} className="bg-slate-800 border border-slate-700 p-5 rounded-xl group hover:border-slate-500">
               <div className="flex items-center gap-4 mb-3">
-                <div className={`p-3 rounded-lg ${daysOld >= 7 && !hdd.warningMuted ? 'bg-orange-500/20 text-orange-400' : 'bg-slate-700 text-indigo-400'}`}><HardDrive size={24} /></div>
+                <div className={`p-3 rounded-lg ${daysOld >= 7 && !hdd?.warningMuted ? 'bg-orange-500/20 text-orange-400' : 'bg-slate-700 text-indigo-400'}`}><HardDrive size={24} /></div>
                 <div className="flex-1 min-w-0">
-                  <h4 className="font-bold text-white flex items-center gap-2">{hdd.name} {daysOld >= 7 && !hdd.warningMuted && <span className="bg-orange-500/20 text-orange-400 text-[10px] px-1.5 rounded flex items-center"><AlertTriangle size={10}/> Usang</span>}</h4>
-                  <p className="text-xs text-slate-400">{Number(hdd.fileCount).toLocaleString()} file | Diupdate: {new Date(hdd.lastUpdated || hdd.dateAdded).toLocaleDateString()}</p>
+                  <h4 className="font-bold text-white flex items-center gap-2">{hdd?.name} {daysOld >= 7 && !hdd?.warningMuted && <span className="bg-orange-500/20 text-orange-400 text-[10px] px-1.5 rounded flex items-center"><AlertTriangle size={10}/> Usang</span>}</h4>
+                  <p className="text-xs text-slate-400">{Number(hdd?.fileCount || 0).toLocaleString()} file | Diupdate: {new Date(hdd?.lastUpdated || hdd?.dateAdded || Date.now()).toLocaleDateString()}</p>
                 </div>
                 <div className="flex gap-1">
-                  {daysOld >= 7 && <button onClick={() => toggleHddWarning(hdd)} className="p-2 text-slate-400 hover:text-orange-400">{hdd.warningMuted ? <BellOff size={16}/> : <Bell size={16}/>}</button>}
+                  {daysOld >= 7 && <button onClick={() => toggleHddWarning(hdd)} className="p-2 text-slate-400 hover:text-orange-400">{hdd?.warningMuted ? <BellOff size={16}/> : <Bell size={16}/>}</button>}
                   <button onClick={() => { setReplacingHdd(hdd); replaceFileInputRef.current?.click(); }} className="p-2 text-slate-400 hover:text-emerald-400"><RefreshCw size={16}/></button>
                   <button onClick={() => exportHddToHTML(hdd)} className="p-2 text-slate-400 hover:text-indigo-400"><FileOutput size={16}/></button>
-                  <button onClick={() => removeHdd(hdd.id)} className="p-2 text-slate-400 hover:text-red-400"><Trash2 size={16}/></button>
+                  <button onClick={() => removeHdd(hdd?.id)} className="p-2 text-slate-400 hover:text-red-400"><Trash2 size={16}/></button>
                 </div>
               </div>
               <div className="bg-slate-900/50 p-3 rounded-lg">
                 <div className="flex justify-between text-xs text-slate-400 mb-1">
-                  <span>{formatBytes(hdd.totalSize)} Terpakai</span>
-                  {editingCapacityId === hdd.id ? <select autoFocus onBlur={()=>setEditingCapacityId(null)} onChange={e=>updateHddCapacity(hdd.id, e.target.value)} defaultValue={hdd.capacity} className="bg-slate-800 text-white rounded px-1">{HDD_CAPACITIES.map(c=><option key={c.value} value={c.value}>{c.label}</option>)}</select> : <span onClick={()=>setEditingCapacityId(hdd.id)} className="cursor-pointer hover:text-white flex items-center gap-1">Max: {formatBytes(hdd.capacity||0)} <Pencil size={10}/></span>}
+                  <span>{formatBytes(hdd?.totalSize)} Terpakai</span>
+                  {editingCapacityId === hdd?.id ? <select autoFocus onBlur={()=>setEditingCapacityId(null)} onChange={e=>updateHddCapacity(hdd?.id, e.target.value)} defaultValue={hdd?.capacity} className="bg-slate-800 text-white rounded px-1">{HDD_CAPACITIES.map(c=><option key={c.value} value={c.value}>{c.label}</option>)}</select> : <span onClick={()=>setEditingCapacityId(hdd?.id)} className="cursor-pointer hover:text-white flex items-center gap-1">Max: {formatBytes(hdd?.capacity||0)} <Pencil size={10}/></span>}
                 </div>
                 <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden"><div className={`h-full ${usedP>90?'bg-red-500':'bg-indigo-500'}`} style={{width:`${usedP}%`}}/></div>
               </div>
@@ -846,28 +882,28 @@ export default function App() {
       <header className="mb-6 flex justify-between items-end">
         <div><h2 className="text-3xl font-bold text-white mb-2">Audit Project</h2><p className="text-slate-400">Sinkronisasi otomatis Sheet Master dengan Cloud.</p></div>
         <div className="flex gap-2">
-          {auditState.data && (
+          {auditState?.data && (
             <button onClick={() => {
-              const html = `<html><head><title>Laporan Audit</title><style>body{font-family:sans-serif;padding:20px;}</style></head><body><h1>Laporan Audit (${auditState.filter})</h1><p>Aman: ${displayedAudit.found.length} | Hilang: ${displayedAudit.missing.length}</p></body></html>`;
+              const html = `<html><head><title>Laporan Audit</title><style>body{font-family:sans-serif;padding:20px;}</style></head><body><h1>Laporan Audit (${auditState?.filter})</h1><p>Aman: ${displayedAudit?.found?.length || 0} | Hilang: ${displayedAudit?.missing?.length || 0}</p></body></html>`;
               const w = window.open(); w.document.write(html); w.print();
             }} className="bg-rose-600 hover:bg-rose-500 px-4 py-2 rounded-lg text-white font-bold flex items-center gap-2"><Printer size={16}/> PDF</button>
           )}
-          <button onClick={handleAudit} disabled={auditState.isAuditing || isFilesSyncing} className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg text-white font-bold flex items-center gap-2">{auditState.isAuditing ? <Loader2 className="animate-spin"/> : <RefreshCw/>} Refresh</button>
+          <button onClick={handleAudit} disabled={auditState?.isAuditing || isFilesSyncing} className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg text-white font-bold flex items-center gap-2">{auditState?.isAuditing ? <Loader2 className="animate-spin"/> : <RefreshCw/>} Refresh</button>
         </div>
       </header>
-      {!auditState.data ? (
+      {!auditState?.data ? (
         <div className="flex-1 bg-slate-800 rounded-2xl flex items-center justify-center text-slate-500"><FileSpreadsheet size={48} className="opacity-50 mb-4"/><p>Klik Refresh untuk memulai audit.</p></div>
       ) : (
         <div className="flex-1 flex flex-col gap-6 min-h-0">
-          <div className="flex gap-2 bg-slate-800 p-2 rounded-xl shrink-0">{['All', 'Video', 'Visual', 'Isadaya', 'Lainnya'].map(c => <button key={c} onClick={() => setAuditState(p=>({...p, filter: c}))} className={`px-4 py-1.5 rounded-lg text-sm font-bold ${auditState.filter===c?'bg-indigo-600 text-white':'text-slate-400 hover:bg-slate-700'}`}>{c}</button>)}</div>
+          <div className="flex gap-2 bg-slate-800 p-2 rounded-xl shrink-0">{['All', 'Video', 'Visual', 'Isadaya', 'Lainnya'].map(c => <button key={c} onClick={() => setAuditState(p=>({...p, filter: c}))} className={`px-4 py-1.5 rounded-lg text-sm font-bold ${auditState?.filter===c?'bg-indigo-600 text-white':'text-slate-400 hover:bg-slate-700'}`}>{c}</button>)}</div>
           <div className="flex-1 flex gap-6 min-h-0">
             <div className="flex-1 bg-slate-800 border border-red-500/30 rounded-2xl flex flex-col">
-              <div className="p-4 border-b border-red-500/20 bg-red-500/10 flex justify-between font-bold text-red-400"><span className="flex items-center gap-2"><AlertTriangle/> Hilang</span> <span className="bg-red-500 text-white px-2 py-0.5 rounded">{displayedAudit?.missing.length}</span></div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-2">{displayedAudit?.missing.map((p,i) => <div key={i} className="bg-slate-900 p-3 rounded-lg"><p className="text-white text-sm font-medium">{p.name}</p><p className="text-[10px] text-slate-500 uppercase">{p.category}</p></div>)}</div>
+              <div className="p-4 border-b border-red-500/20 bg-red-500/10 flex justify-between font-bold text-red-400"><span className="flex items-center gap-2"><AlertTriangle/> Hilang</span> <span className="bg-red-500 text-white px-2 py-0.5 rounded">{displayedAudit?.missing?.length || 0}</span></div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">{displayedAudit?.missing?.map((p,i) => <div key={i} className="bg-slate-900 p-3 rounded-lg"><p className="text-white text-sm font-medium">{p?.name}</p><p className="text-[10px] text-slate-500 uppercase">{p?.category}</p></div>)}</div>
             </div>
             <div className="flex-1 bg-slate-800 border border-emerald-500/30 rounded-2xl flex flex-col">
-              <div className="p-4 border-b border-emerald-500/20 bg-emerald-500/10 flex justify-between font-bold text-emerald-400"><span className="flex items-center gap-2"><CheckSquare/> Ter-Backup</span> <span className="bg-emerald-500 text-white px-2 py-0.5 rounded">{displayedAudit?.found.length}</span></div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-2">{displayedAudit?.found.map((p,i) => <div key={i} className="bg-slate-900 p-3 rounded-lg flex justify-between items-center group"><div className="flex-1 min-w-0"><p className="text-white text-sm font-medium truncate">{p.name}</p><p className="text-[10px] text-emerald-500 font-mono mt-1 truncate">{p.foundPath}</p></div><button onClick={()=>{setExplorerPath(p.foundPath);setActiveTab('explorer');}} className="p-2 bg-slate-800 hover:bg-indigo-500 text-slate-400 hover:text-white rounded"><FolderOpen size={16}/></button></div>)}</div>
+              <div className="p-4 border-b border-emerald-500/20 bg-emerald-500/10 flex justify-between font-bold text-emerald-400"><span className="flex items-center gap-2"><CheckSquare/> Ter-Backup</span> <span className="bg-emerald-500 text-white px-2 py-0.5 rounded">{displayedAudit?.found?.length || 0}</span></div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">{displayedAudit?.found?.map((p,i) => <div key={i} className="bg-slate-900 p-3 rounded-lg flex justify-between items-center group"><div className="flex-1 min-w-0"><p className="text-white text-sm font-medium truncate">{p?.name}</p><p className="text-[10px] text-emerald-500 font-mono mt-1 truncate">{p?.foundPath}</p></div><button onClick={()=>{setExplorerPath(p?.foundPath);setActiveTab('explorer');}} className="p-2 bg-slate-800 hover:bg-indigo-500 text-slate-400 hover:text-white rounded"><FolderOpen size={16}/></button></div>)}</div>
             </div>
           </div>
         </div>
@@ -878,22 +914,22 @@ export default function App() {
   const renderDuplicates = () => (
     <div className="max-w-6xl mx-auto flex flex-col h-full animate-in fade-in slide-in-from-bottom-4 pb-24">
       <header className="mb-6 flex justify-between items-end">
-        <div><h2 className="text-3xl font-bold text-white mb-1">Pencari Duplikat</h2><p className="text-slate-400">Potensi Hemat: <span className="text-red-400">{formatBytes(duplicates.data.wasted)}</span></p></div>
+        <div><h2 className="text-3xl font-bold text-white mb-1">Pencari Duplikat</h2><p className="text-slate-400">Potensi Hemat: <span className="text-red-400">{formatBytes(duplicates?.data?.wasted)}</span></p></div>
         <div className="flex gap-2"><button onClick={() => setDuplicates(p=>({...p, selected: new Set()}))} className="px-4 py-2 bg-slate-800 rounded-lg text-sm text-slate-300">Batal</button><button onClick={smartSelectDuplicates} className="px-4 py-2 bg-indigo-600 rounded-lg text-sm text-white font-bold flex items-center gap-2"><CheckSquare size={16}/> Pilih Pintar</button></div>
       </header>
       <div className="flex-1 bg-slate-800 rounded-2xl flex flex-col overflow-hidden">
-        {duplicates.isCalculating ? <div className="flex-1 flex flex-col items-center justify-center text-indigo-400"><Loader2 size={48} className="animate-spin mb-4"/><p>Menghitung data...</p></div> : 
-         !duplicates.data.groups.length ? <div className="flex-1 flex flex-col items-center justify-center text-slate-500"><Search size={48} className="mb-4 opacity-50"/><p>Bersih! Tidak ada duplikat.</p></div> : 
+        {duplicates?.isCalculating ? <div className="flex-1 flex flex-col items-center justify-center text-indigo-400"><Loader2 size={48} className="animate-spin mb-4"/><p>Menghitung data...</p></div> : 
+         !duplicates?.data?.groups?.length ? <div className="flex-1 flex flex-col items-center justify-center text-slate-500"><Search size={48} className="mb-4 opacity-50"/><p>Bersih! Tidak ada duplikat.</p></div> : 
          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-           {duplicates.data.groups.slice(0, 200).map((g, i) => (
-             <DuplicateGroupItem key={i} group={g} wasted={g[0].size*(g.length-1)} hddsInvolved={[...new Set(g.map(f=>f.hddName))]} selectedFileIds={duplicates.selected} onToggle={id => setDuplicates(p => { const s = new Set(p.selected); s.has(id)?s.delete(id):s.add(id); return {...p, selected: s} })} />
+           {duplicates?.data?.groups?.slice(0, 200).map((g, i) => (
+             <DuplicateGroupItem key={i} group={g} wasted={(g?.[0]?.size || 0)*(g?.length-1)} hddsInvolved={[...new Set(g?.map(f=>f?.hddName))]} selectedFileIds={duplicates?.selected} onToggle={id => setDuplicates(p => { const s = new Set(p.selected); s.has(id)?s.delete(id):s.add(id); return {...p, selected: s} })} />
            ))}
          </div>
         }
       </div>
-      {duplicates.selected.size > 0 && (
+      {(duplicates?.selected?.size || 0) > 0 && (
         <div className="absolute bottom-0 right-0 left-64 bg-slate-800 p-4 border-t border-slate-700 flex justify-between items-center z-20">
-          <p className="text-white font-bold">{duplicates.selected.size} File Dipilih</p>
+          <p className="text-white font-bold">{duplicates?.selected?.size} File Dipilih</p>
           <div className="flex gap-3">
             <button onClick={generateBatScript} className="bg-red-600 hover:bg-red-500 px-6 py-2 rounded-xl text-white font-bold flex items-center gap-2"><Download size={16}/> Script .BAT</button>
             <button onClick={executeDeleteDuplicates} disabled={isProcessing} className="bg-orange-600 hover:bg-orange-500 px-6 py-2 rounded-xl text-white font-bold flex items-center gap-2"><Cloud size={16}/> Hapus DB</button>
@@ -1004,10 +1040,10 @@ git push -u origin main`}
       <header><h2 className="text-3xl font-bold text-white mb-2">Manajemen Pengguna</h2><p className="text-slate-400">Atur peran tim Anda.</p></header>
       <div className="bg-slate-800 rounded-2xl overflow-hidden shadow-xl border border-slate-700">
         <table className="w-full text-left text-sm"><thead className="bg-slate-900/50 text-slate-400 uppercase text-xs"><tr><th className="px-6 py-4">Email</th><th className="px-6 py-4">Role</th><th className="px-6 py-4 text-right">Aksi</th></tr></thead><tbody className="divide-y divide-slate-700/50">
-          {usersList.map(u => (
-            <tr key={u.id} className="hover:bg-slate-700/30"><td className="px-6 py-4 font-medium text-white"><div className="flex items-center gap-2"><User size={16} className="text-slate-400"/>{u.email}</div></td><td className="px-6 py-4 uppercase text-[10px] font-bold text-indigo-400">{u.role}</td><td className="px-6 py-4 text-right flex justify-end gap-2">
-              <select disabled={u.id===user.id} value={u.role||'viewer'} onChange={e=>updateUserRole(u.id,u.email,e.target.value)} className="bg-slate-900 border-slate-600 rounded p-1.5"><option value="viewer">Viewer</option><option value="editor">Editor</option><option value="admin">Admin</option></select>
-              <button disabled={u.id===user.id} onClick={()=>deleteUserAccount(u.id,u.email)} className="p-1.5 text-slate-500 hover:text-red-400"><Trash2 size={16}/></button>
+          {usersList.filter(Boolean).map(u => (
+            <tr key={u?.id} className="hover:bg-slate-700/30"><td className="px-6 py-4 font-medium text-white"><div className="flex items-center gap-2"><User size={16} className="text-slate-400"/>{u?.email}</div></td><td className="px-6 py-4 uppercase text-[10px] font-bold text-indigo-400">{u?.role}</td><td className="px-6 py-4 text-right flex justify-end gap-2">
+              <select disabled={u?.id===user?.id} value={u?.role||'viewer'} onChange={e=>updateUserRole(u?.id,u?.email,e.target.value)} className="bg-slate-900 border-slate-600 rounded p-1.5"><option value="viewer">Viewer</option><option value="editor">Editor</option><option value="admin">Admin</option></select>
+              <button disabled={u?.id===user?.id} onClick={()=>deleteUserAccount(u?.id,u?.email)} className="p-1.5 text-slate-500 hover:text-red-400"><Trash2 size={16}/></button>
             </td></tr>
           ))}
         </tbody></table>
@@ -1020,8 +1056,8 @@ git push -u origin main`}
       <header><h2 className="text-3xl font-bold text-white mb-2">Riwayat Sistem</h2><p className="text-slate-400">Log jejak aktivitas di Cloud.</p></header>
       <div className="bg-slate-800 rounded-2xl overflow-hidden shadow-xl border border-slate-700 h-[600px] overflow-y-auto">
         <table className="w-full text-left text-sm"><thead className="bg-slate-900/50 text-slate-400 uppercase text-xs sticky top-0"><tr><th className="px-6 py-4">Waktu</th><th className="px-6 py-4">User</th><th className="px-6 py-4">Aktivitas</th></tr></thead><tbody className="divide-y divide-slate-700/50">
-          {logs.map(l => (
-            <tr key={l.id} className="hover:bg-slate-700/30"><td className="px-6 py-4 text-slate-400">{new Date(l.timestamp).toLocaleString('id-ID')}</td><td className="px-6 py-4 text-white">{l.userEmail}</td><td className="px-6 py-4 text-slate-300"><b>{l.action}</b><br/><span className="text-xs text-slate-500">{l.details}</span></td></tr>
+          {logs.filter(Boolean).map(l => (
+            <tr key={l?.id} className="hover:bg-slate-700/30"><td className="px-6 py-4 text-slate-400">{new Date(l?.timestamp || Date.now()).toLocaleString('id-ID')}</td><td className="px-6 py-4 text-white">{l?.userEmail}</td><td className="px-6 py-4 text-slate-300"><b>{l?.action}</b><br/><span className="text-xs text-slate-500">{l?.details}</span></td></tr>
           ))}
         </tbody></table>
       </div>
@@ -1031,7 +1067,7 @@ git push -u origin main`}
   const renderLocalCheck = () => (
     <div className="max-w-6xl mx-auto h-full flex flex-col animate-in fade-in slide-in-from-bottom-4 pb-8">
       <header className="mb-6"><h2 className="text-3xl font-bold text-white mb-2">Cek HDD Pribadi (Lokal)</h2><p className="text-slate-400">Pastikan file di HDD Anda sudah ter-backup sebelum dihapus.</p></header>
-      {!localScan.files ? (
+      {!localScan?.files ? (
         <div className="bg-slate-800 p-8 rounded-2xl text-center border-2 border-dashed border-slate-600 hover:border-indigo-500 cursor-pointer" onClick={() => localFileInputRef.current?.click()}>
           <input type="file" accept=".html,.htm" className="hidden" ref={localFileInputRef} onChange={handleLocalCheck} />
           <Laptop size={48} className="mx-auto text-slate-500 mb-4"/>
@@ -1040,16 +1076,16 @@ git push -u origin main`}
       ) : (
         <div className="flex-1 flex flex-col min-h-0">
           <div className="grid grid-cols-4 gap-4 mb-4 shrink-0">
-            <div className="bg-slate-800 p-4 rounded-xl"><p className="text-xs text-slate-400">File</p><p className="text-lg font-bold text-white truncate">{localScan.name}</p></div>
-            <div className="bg-slate-800 border border-emerald-500/30 p-4 rounded-xl"><p className="text-xs text-emerald-400">File Unik (Baru)</p><p className="text-2xl font-bold text-white">{localCheckResults.unique.length}</p></div>
-            <div className="bg-slate-800 border border-red-500/30 p-4 rounded-xl"><p className="text-xs text-red-400">Sudah di Server</p><p className="text-2xl font-bold text-white">{localCheckResults.duplicates.length}</p></div>
+            <div className="bg-slate-800 p-4 rounded-xl"><p className="text-xs text-slate-400">File</p><p className="text-lg font-bold text-white truncate">{localScan?.name}</p></div>
+            <div className="bg-slate-800 border border-emerald-500/30 p-4 rounded-xl"><p className="text-xs text-emerald-400">File Unik (Baru)</p><p className="text-2xl font-bold text-white">{localCheckResults?.unique?.length || 0}</p></div>
+            <div className="bg-slate-800 border border-red-500/30 p-4 rounded-xl"><p className="text-xs text-red-400">Sudah di Server</p><p className="text-2xl font-bold text-white">{localCheckResults?.duplicates?.length || 0}</p></div>
             <button onClick={()=>setLocalScan({files:null,name:''})} className="bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold">Reset Cek</button>
           </div>
           <div className="flex-1 bg-slate-800 rounded-xl overflow-hidden flex flex-col">
             <div className="p-3 bg-slate-900/50 border-b border-slate-700 text-sm font-bold text-white">Detail Duplikat (Aman Dihapus)</div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {localCheckResults.duplicates.slice(0,300).map((d,i) => (
-                <div key={i} className="bg-slate-900/50 p-3 rounded-lg flex items-center justify-between"><div className="min-w-0"><p className="text-white text-sm font-bold truncate">{d.local.name}</p><p className="text-xs text-slate-500 truncate">{d.local.path}</p></div><div className="text-right shrink-0 ml-4"><p className="text-xs text-emerald-400 font-bold mb-1">Tersimpan di:</p>{d.cloud.map((c,ci)=><div key={ci} className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded inline-block ml-1">{c.hddName}</div>)}</div></div>
+              {localCheckResults?.duplicates?.slice(0,300).map((d,i) => (
+                <div key={i} className="bg-slate-900/50 p-3 rounded-lg flex items-center justify-between"><div className="min-w-0"><p className="text-white text-sm font-bold truncate">{d?.local?.name}</p><p className="text-xs text-slate-500 truncate">{d?.local?.path}</p></div><div className="text-right shrink-0 ml-4"><p className="text-xs text-emerald-400 font-bold mb-1">Tersimpan di:</p>{d?.cloud?.map((c,ci)=><div key={ci} className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded inline-block ml-1">{c?.hddName}</div>)}</div></div>
               ))}
             </div>
           </div>
@@ -1104,8 +1140,8 @@ git push -u origin main`}
 
         <div className="p-4 border-t border-slate-700 bg-slate-900/30 flex items-center gap-3">
           <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-full"><User size={20} /></div>
-          <div className="flex-1 min-w-0"><p className="text-xs font-bold text-white truncate">{user.email}</p><p className="text-[10px] uppercase font-black text-indigo-400">{userRole}</p></div>
-          <button onClick={() => window.supabase.auth.signOut()} className="p-2 text-slate-400 hover:text-red-400"><LogOut size={18} /></button>
+          <div className="flex-1 min-w-0"><p className="text-xs font-bold text-white truncate">{user?.email}</p><p className="text-[10px] uppercase font-black text-indigo-400">{userRole}</p></div>
+          <button onClick={() => supabase.auth.signOut()} className="p-2 text-slate-400 hover:text-red-400"><LogOut size={18} /></button>
         </div>
       </div>
 
@@ -1138,10 +1174,9 @@ git push -u origin main`}
   );
 }
 
-// KOMPONEN DUKUNGAN (MURNI UI)
 const DuplicateGroupItem = ({ group, wasted, hddsInvolved, selectedFileIds, onToggle }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const selCount = group.filter(f => selectedFileIds.has(f.id)).length;
+  const selCount = group.filter(f => selectedFileIds.has(f?.id)).length;
   
   return (
     <div className={`border rounded-xl transition-colors ${isExpanded ? 'bg-slate-800/80 border-slate-600' : 'bg-slate-900/30 border-slate-700/50'}`}>
@@ -1149,7 +1184,7 @@ const DuplicateGroupItem = ({ group, wasted, hddsInvolved, selectedFileIds, onTo
         <div className="col-span-6 flex items-center gap-3">
           {isExpanded ? <ChevronDown size={16} className="text-slate-500 shrink-0"/> : <ChevronRight size={16} className="text-slate-500 shrink-0"/>}
           <Files size={16} className="text-indigo-400 shrink-0"/>
-          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-white truncate">{group[0].name}</p><p className="text-xs text-slate-400">{formatBytes(group[0].size)} • {group.length} copy</p></div>
+          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-white truncate">{group?.[0]?.name}</p><p className="text-xs text-slate-400">{formatBytes(group?.[0]?.size)} • {group?.length} copy</p></div>
         </div>
         <div className="col-span-4 flex flex-wrap gap-1 justify-center">{hddsInvolved.map(h => <span key={h} className="text-[10px] bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-600">{h}</span>)}</div>
         <div className="col-span-2 text-right flex flex-col items-end gap-1"><span className="text-sm font-bold text-red-400">{formatBytes(wasted)}</span>{selCount > 0 && <span className="text-[10px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded-full">{selCount} ditandai</span>}</div>
@@ -1157,12 +1192,12 @@ const DuplicateGroupItem = ({ group, wasted, hddsInvolved, selectedFileIds, onTo
       {isExpanded && (
         <div className="border-t border-slate-700/50 bg-slate-900/50 p-2 space-y-1 rounded-b-xl">
           {group.map(f => {
-            const sel = selectedFileIds.has(f.id);
+            const sel = selectedFileIds.has(f?.id);
             return (
-              <div key={f.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer ${sel ? 'bg-red-500/10 border-red-500/30' : 'hover:bg-slate-800 border-transparent'} border`} onClick={() => onToggle(f.id)}>
+              <div key={f?.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer ${sel ? 'bg-red-500/10 border-red-500/30' : 'hover:bg-slate-800 border-transparent'} border`} onClick={() => onToggle(f?.id)}>
                 {sel ? <CheckSquare size={16} className="text-red-500"/> : <Square size={16} className="text-slate-400"/>}
-                <div className="px-2 py-1 bg-slate-800 rounded text-xs font-bold text-indigo-300 shrink-0">{f.hddName}</div>
-                <div className="flex-1 text-sm text-slate-300 truncate"><span className="text-slate-500">{f.vPath} \ </span><span className={sel ? 'text-red-300 line-through opacity-70' : 'text-slate-200'}>{f.name}</span></div>
+                <div className="px-2 py-1 bg-slate-800 rounded text-xs font-bold text-indigo-300 shrink-0">{f?.hddName}</div>
+                <div className="flex-1 text-sm text-slate-300 truncate"><span className="text-slate-500">{f?.vPath} \ </span><span className={sel ? 'text-red-300 line-through opacity-70' : 'text-slate-200'}>{f?.name}</span></div>
               </div>
             );
           })}
