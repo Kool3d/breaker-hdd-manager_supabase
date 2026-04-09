@@ -17,8 +17,8 @@ import { createClient } from '@supabase/supabase-js';
 
 // Menggunakan import.meta.env untuk Vite, dengan fallback hardcode ke kredensial Anda 
 // agar mencegah blank screen jika lupa setting Environment Variable di Netlify.
-const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL || "https://rdbbauwvwsazdqdsryjd.supabase.co";
-const supabaseAnonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY || "sb_secret_VtrmkX0W8fnZL_QK7pXV4Q_6wZPzLe2";
+const supabaseUrl = "https://rdbbauwvwsazdqdsryjd.supabase.co";
+const supabaseAnonKey = "sb_secret_VtrmkX0W8fnZL_QK7pXV4Q_6wZPzLe2";
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
