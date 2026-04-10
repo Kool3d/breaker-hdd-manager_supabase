@@ -205,7 +205,7 @@ export default function App() {
   const [editCapacityVal, setEditCapacityVal] = useState('');
 
   // Search (server-side)
-  const [searchQuery, setSearchQuery] = useState(');
+  const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searchFolders, setSearchFolders] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
