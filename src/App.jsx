@@ -205,12 +205,15 @@ export default function App() {
   const [editCapacityVal, setEditCapacityVal] = useState('');
 
   // Search (server-side)
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(');
   const [searchResults, setSearchResults] = useState([]);
   const [searchFolders, setSearchFolders] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchPage, setSearchPage] = useState(0);
   const [searchTotal, setSearchTotal] = useState(0);
+  const [searchSortBy, setSearchSortBy] = useState('name');
+  const [searchSortDir, setSearchSortDir] = useState('asc');
+  const [searchActiveTab, setSearchActiveTab] = useState('all');
   const searchDebounceRef = useRef(null);
 
   // Explorer (lazy per HDD)
@@ -1261,87 +1264,159 @@ export default function App() {
 
           {/* ====== SEARCH ====== */}
           {activeTab === 'search' && (
-            <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="max-w-5xl mx-auto space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <header>
-                <h2 className="text-3xl font-bold text-white mb-1">Cari File</h2>
+                <h2 className="text-3xl font-bold text-white mb-1">Cari File & Folder</h2>
                 <p className="text-slate-400">Pencarian langsung ke database server — cepat & akurat.</p>
               </header>
 
+              {/* Search Input */}
               <div className="relative">
                 <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Ketik nama file yang dicari..."
+                <input type="text" value={searchQuery} onChange={e => { setSearchQuery(e.target.value); setSearchPage(0); }}
+                  placeholder="Ketik nama file atau folder yang dicari..."
                   className="w-full bg-slate-800 border border-slate-700 rounded-2xl py-4 pl-12 pr-12 text-white text-base focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all shadow-lg" />
                 {isSearching && <Loader2 size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-indigo-500 animate-spin" />}
                 {searchQuery && !isSearching && (
-                  <button onClick={() => setSearchQuery('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"><X size={18} /></button>
+                  <button onClick={() => { setSearchQuery(''); setSearchResults([]); setSearchFolders([]); }} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"><X size={18} /></button>
                 )}
               </div>
 
-              {searchQuery && (
-                <p className="text-sm text-slate-400">
-                  {isSearching ? 'Mencari...' : `Ditemukan ${searchTotal.toLocaleString()} file${searchFolders.length > 0 ? ` • ${searchFolders.length} folder` : ''}`}
-                </p>
-              )}
-
-              {/* FOLDER RESULTS */}
-              {searchFolders.length > 0 && (
-                <div className="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden shadow-xl">
-                  <div className="bg-slate-900/50 px-4 py-3 border-b border-slate-700 flex items-center gap-2">
-                    <FolderIcon size={16} className="text-yellow-400" />
-                    <span className="text-sm font-bold text-slate-300">Folder Ditemukan ({searchFolders.length})</span>
-                  </div>
-                  <div className="divide-y divide-slate-700/50">
-                    {searchFolders.map((folder, i) => (
-                      <div key={i}
-                        className="flex items-center gap-3 px-4 py-3 hover:bg-slate-700/30 cursor-pointer transition-colors group"
-                        onClick={() => {
-                          const hdd = hdds.find(h => h.name === folder.hdd_name);
-                          if (hdd) {
-                            setExplorerHddId(hdd.id);
-                            setExplorerPath(folder.path);
-                            switchTab('explorer');
-                          }
-                        }}>
-                        <FolderIcon size={16} className="text-yellow-400 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-slate-200 truncate">{folder.folderName}</p>
-                          <p className="text-xs text-slate-500 font-mono truncate">{folder.hdd_name} \ {folder.path}</p>
-                        </div>
-                        <FolderOpen size={14} className="text-slate-500 group-hover:text-indigo-400 transition-colors shrink-0" />
-                      </div>
+              {/* Toolbar: Filter Tab + Sort */}
+              {searchQuery && (searchResults.length > 0 || searchFolders.length > 0) && (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  {/* Tab filter */}
+                  <div className="flex items-center bg-slate-800 border border-slate-700 rounded-xl p-1 gap-1">
+                    {[
+                      { id: 'all', label: `Semua (${searchTotal + searchFolders.length})` },
+                      { id: 'files', label: `File (${searchTotal})` },
+                      { id: 'folders', label: `Folder (${searchFolders.length})` },
+                    ].map(t => (
+                      <button key={t.id} onClick={() => setSearchActiveTab(t.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${searchActiveTab === t.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                        {t.label}
+                      </button>
                     ))}
+                  </div>
+
+                  {/* Sort */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500 font-medium">Urutkan:</span>
+                    <select value={searchSortBy} onChange={e => setSearchSortBy(e.target.value)}
+                      className="bg-slate-800 border border-slate-700 rounded-lg py-1.5 px-3 text-white text-xs focus:border-indigo-500 outline-none cursor-pointer">
+                      <option value="name">Nama</option>
+                      <option value="size">Ukuran</option>
+                      <option value="date">Tanggal</option>
+                      <option value="hdd">HDD</option>
+                    </select>
+                    <button onClick={() => setSearchSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                      className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 hover:text-white hover:border-indigo-500 transition-colors font-mono">
+                      {searchSortDir === 'asc' ? '↑ A-Z' : '↓ Z-A'}
+                    </button>
                   </div>
                 </div>
               )}
 
-              {searchResults.length > 0 && (
+              {searchQuery && (
+                <p className="text-xs text-slate-500">
+                  {isSearching ? 'Mencari...' : `${searchTotal.toLocaleString()} file • ${searchFolders.length} folder ditemukan`}
+                </p>
+              )}
+
+              {/* FOLDER RESULTS */}
+              {(searchActiveTab === 'all' || searchActiveTab === 'folders') && searchFolders.length > 0 && (
                 <div className="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden shadow-xl">
+                  <div className="bg-slate-900/50 px-4 py-3 border-b border-slate-700 flex items-center gap-2">
+                    <FolderIcon size={16} className="text-yellow-400" />
+                    <span className="text-sm font-bold text-slate-300">Folder ({searchFolders.length})</span>
+                  </div>
+                  <div className="divide-y divide-slate-700/50 max-h-72 overflow-y-auto">
+                    {[...searchFolders]
+                      .sort((a, b) => {
+                        let va = a.folderName, vb = b.folderName;
+                        if (searchSortBy === 'hdd') { va = a.hdd_name; vb = b.hdd_name; }
+                        const r = va.localeCompare(vb, undefined, { numeric: true });
+                        return searchSortDir === 'asc' ? r : -r;
+                      })
+                      .map((folder, i) => (
+                        <div key={i}
+                          className="flex items-center gap-3 px-4 py-3 hover:bg-slate-700/30 cursor-pointer transition-colors group"
+                          onClick={() => {
+                            const hdd = hdds.find(h => h.name === folder.hdd_name);
+                            if (hdd) { setExplorerHddId(hdd.id); setExplorerPath(folder.path); switchTab('explorer'); }
+                          }}>
+                          <FolderIcon size={16} className="text-yellow-400 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-slate-200 truncate">{folder.folderName}</p>
+                            <p className="text-xs text-slate-500 font-mono truncate">{folder.hdd_name} \ {folder.path}</p>
+                          </div>
+                          <span className="text-[10px] text-indigo-400 bg-indigo-500/10 px-2 py-1 rounded-lg font-medium shrink-0 hidden sm:block">{folder.hdd_name}</span>
+                          <button className="p-1.5 bg-slate-700 group-hover:bg-indigo-600 text-slate-400 group-hover:text-white rounded-lg transition-all shrink-0" title="Buka di Explorer">
+                            <FolderOpen size={14} />
+                          </button>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
+              )}
+
+              {/* FILE RESULTS */}
+              {(searchActiveTab === 'all' || searchActiveTab === 'files') && searchResults.length > 0 && (
+                <div className="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden shadow-xl">
+                  <div className="bg-slate-900/50 px-4 py-3 border-b border-slate-700 flex items-center gap-2">
+                    <FileIcon size={16} className="text-indigo-400" />
+                    <span className="text-sm font-bold text-slate-300">File ({searchTotal.toLocaleString()})</span>
+                  </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
-                      <thead className="bg-slate-900/50 text-slate-400 uppercase text-xs">
+                      <thead className="bg-slate-900/30 text-slate-400 uppercase text-xs">
                         <tr>
                           <th className="px-4 py-3 font-bold">Nama File</th>
                           <th className="px-4 py-3 font-bold">HDD</th>
-                          <th className="px-4 py-3 font-bold">Path</th>
+                          <th className="px-4 py-3 font-bold hidden md:table-cell">Path</th>
                           <th className="px-4 py-3 font-bold text-right">Ukuran</th>
-                          <th className="px-4 py-3 font-bold">Tanggal</th>
+                          <th className="px-4 py-3 font-bold hidden sm:table-cell">Tanggal</th>
+                          <th className="px-4 py-3 font-bold text-center">Lokasi</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-700/50">
-                        {searchResults.map(f => (
-                          <tr key={f.id} className="hover:bg-slate-700/30 transition-colors">
-                            <td className="px-4 py-3">
-                              <span className="text-white font-medium flex items-center gap-2">
-                                <FileIcon size={14} className="text-slate-500 shrink-0" />{f.name}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-indigo-400 font-medium text-xs">{f.hdd_name}</td>
-                            <td className="px-4 py-3 text-slate-400 text-xs font-mono max-w-[200px] truncate">{f.path}</td>
-                            <td className="px-4 py-3 text-slate-300 text-right whitespace-nowrap">{formatBytes(f.size)}</td>
-                            <td className="px-4 py-3 text-slate-400 text-xs whitespace-nowrap">{f.date}</td>
-                          </tr>
-                        ))}
+                        {[...searchResults]
+                          .sort((a, b) => {
+                            let va, vb;
+                            if (searchSortBy === 'size') { va = a.size; vb = b.size; return searchSortDir === 'asc' ? va - vb : vb - va; }
+                            if (searchSortBy === 'date') { va = a.date || ''; vb = b.date || ''; }
+                            else if (searchSortBy === 'hdd') { va = a.hdd_name || ''; vb = b.hdd_name || ''; }
+                            else { va = a.name || ''; vb = b.name || ''; }
+                            const r = va.localeCompare(vb, undefined, { numeric: true });
+                            return searchSortDir === 'asc' ? r : -r;
+                          })
+                          .map(f => (
+                            <tr key={f.id} className="hover:bg-slate-700/30 transition-colors group">
+                              <td className="px-4 py-3">
+                                <span className="text-white font-medium flex items-center gap-2 min-w-0">
+                                  <FileIcon size={14} className="text-slate-500 shrink-0" />
+                                  <span className="truncate max-w-[180px] md:max-w-none" title={f.name}>{f.name}</span>
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-indigo-400 font-medium text-xs whitespace-nowrap">{f.hdd_name}</td>
+                              <td className="px-4 py-3 text-slate-400 text-xs font-mono max-w-[180px] truncate hidden md:table-cell" title={f.path}>{f.path}</td>
+                              <td className="px-4 py-3 text-slate-300 text-right whitespace-nowrap text-xs">{formatBytes(f.size)}</td>
+                              <td className="px-4 py-3 text-slate-400 text-xs whitespace-nowrap hidden sm:table-cell">{f.date}</td>
+                              <td className="px-4 py-3 text-center">
+                                <button
+                                  onClick={() => {
+                                    const hdd = hdds.find(h => h.name === f.hdd_name);
+                                    if (hdd) { setExplorerHddId(hdd.id); setExplorerPath(f.path || ''); switchTab('explorer'); }
+                                  }}
+                                  className="p-1.5 bg-slate-700 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-lg transition-all opacity-60 group-hover:opacity-100"
+                                  title="Buka lokasi di Explorer">
+                                  <FolderOpen size={14} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        }
                       </tbody>
                     </table>
                   </div>
@@ -1350,7 +1425,7 @@ export default function App() {
                       <button onClick={() => { const next = searchPage + 1; setSearchPage(next); performSearch(searchQuery, next); }}
                         disabled={isSearching}
                         className="bg-slate-700 hover:bg-slate-600 text-white px-6 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2 mx-auto">
-                        {isSearching ? <Loader2 size={14} className="animate-spin" /> : null}
+                        {isSearching ? <Loader2 size={14} className="animate-spin" /> : <ChevronDown size={14} />}
                         Muat {Math.min(PAGE_SIZE, searchTotal - searchResults.length)} hasil lagi
                       </button>
                     </div>
@@ -1358,10 +1433,10 @@ export default function App() {
                 </div>
               )}
 
-              {searchQuery && !isSearching && searchResults.length === 0 && (
+              {searchQuery && !isSearching && searchResults.length === 0 && searchFolders.length === 0 && (
                 <div className="bg-slate-800 border border-slate-700 rounded-2xl p-12 text-center">
                   <FileSearch size={48} className="text-slate-600 mx-auto mb-4" />
-                  <h3 className="text-lg font-bold text-white mb-2">File tidak ditemukan</h3>
+                  <h3 className="text-lg font-bold text-white mb-2">Tidak ditemukan</h3>
                   <p className="text-slate-400 text-sm">Coba kata kunci yang berbeda.</p>
                 </div>
               )}
@@ -1370,7 +1445,7 @@ export default function App() {
                 <div className="bg-slate-800 border border-slate-700 rounded-2xl p-12 text-center">
                   <Search size={48} className="text-slate-600 mx-auto mb-4" />
                   <h3 className="text-lg font-bold text-white mb-2">Siap mencari</h3>
-                  <p className="text-slate-400 text-sm">Ketik nama file di atas. Pencarian dilakukan langsung ke server.</p>
+                  <p className="text-slate-400 text-sm">Ketik nama file atau folder. Hasil langsung dari server.</p>
                 </div>
               )}
             </div>
