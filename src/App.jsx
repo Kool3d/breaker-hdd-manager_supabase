@@ -207,6 +207,7 @@ export default function App() {
   // Search (server-side)
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
+  const [searchFolders, setSearchFolders] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchPage, setSearchPage] = useState(0);
   const [searchTotal, setSearchTotal] = useState(0);
@@ -533,21 +534,44 @@ export default function App() {
 
   // ===================== SEARCH (SERVER-SIDE) =====================
   const performSearch = useCallback(async (query, page = 0) => {
-    if (!query.trim()) { setSearchResults([]); setSearchTotal(0); return; }
+    if (!query.trim()) { setSearchResults([]); setSearchFolders([]); setSearchTotal(0); return; }
     setIsSearching(true);
     try {
       const from = page * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
-      const { data, count } = await supabase
-        .from('files')
-        .select('id, hdd_id, hdd_name, name, path, size, date', { count: 'exact' })
-        .ilike('name', `%${query}%`)
-        .order('name')
-        .range(from, to);
 
-      if (page === 0) setSearchResults(data || []);
-      else setSearchResults(prev => [...prev, ...(data || [])]);
-      setSearchTotal(count || 0);
+      const [filesRes, foldersRes] = await Promise.all([
+        supabase.from('files')
+          .select('id, hdd_id, hdd_name, name, path, size, date', { count: 'exact' })
+          .ilike('name', `%${query}%`)
+          .order('name')
+          .range(from, to),
+        supabase.from('files')
+          .select('hdd_name, path')
+          .ilike('path', `%${query}%`)
+          .limit(300)
+      ]);
+
+      if (page === 0) {
+        const folderMap = new Map();
+        (foldersRes.data || []).forEach(f => {
+          if (!f.path) return;
+          const parts = f.path.split('\\');
+          parts.forEach((part, i) => {
+            if (!part.toLowerCase().includes(query.toLowerCase())) return;
+            const subPath = parts.slice(0, i + 1).join('\\');
+            const key = `${f.hdd_name}|||${subPath}`;
+            if (!folderMap.has(key)) {
+              folderMap.set(key, { hdd_name: f.hdd_name, path: subPath, folderName: part });
+            }
+          });
+        });
+        setSearchFolders(Array.from(folderMap.values()).slice(0, 50));
+      }
+
+      if (page === 0) setSearchResults(filesRes.data || []);
+      else setSearchResults(prev => [...prev, ...(filesRes.data || [])]);
+      setSearchTotal(filesRes.count || 0);
     } catch (err) { console.error('Search error:', err); }
     finally { setIsSearching(false); }
   }, []);
@@ -1256,8 +1280,39 @@ export default function App() {
 
               {searchQuery && (
                 <p className="text-sm text-slate-400">
-                  {isSearching ? 'Mencari...' : `Ditemukan ${searchTotal.toLocaleString()} file`}
+                  {isSearching ? 'Mencari...' : `Ditemukan ${searchTotal.toLocaleString()} file${searchFolders.length > 0 ? ` • ${searchFolders.length} folder` : ''}`}
                 </p>
+              )}
+
+              {/* FOLDER RESULTS */}
+              {searchFolders.length > 0 && (
+                <div className="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden shadow-xl">
+                  <div className="bg-slate-900/50 px-4 py-3 border-b border-slate-700 flex items-center gap-2">
+                    <FolderIcon size={16} className="text-yellow-400" />
+                    <span className="text-sm font-bold text-slate-300">Folder Ditemukan ({searchFolders.length})</span>
+                  </div>
+                  <div className="divide-y divide-slate-700/50">
+                    {searchFolders.map((folder, i) => (
+                      <div key={i}
+                        className="flex items-center gap-3 px-4 py-3 hover:bg-slate-700/30 cursor-pointer transition-colors group"
+                        onClick={() => {
+                          const hdd = hdds.find(h => h.name === folder.hdd_name);
+                          if (hdd) {
+                            setExplorerHddId(hdd.id);
+                            setExplorerPath(folder.path);
+                            switchTab('explorer');
+                          }
+                        }}>
+                        <FolderIcon size={16} className="text-yellow-400 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-200 truncate">{folder.folderName}</p>
+                          <p className="text-xs text-slate-500 font-mono truncate">{folder.hdd_name} \ {folder.path}</p>
+                        </div>
+                        <FolderOpen size={14} className="text-slate-500 group-hover:text-indigo-400 transition-colors shrink-0" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
 
               {searchResults.length > 0 && (
