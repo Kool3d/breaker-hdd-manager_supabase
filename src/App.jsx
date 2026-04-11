@@ -179,8 +179,19 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Set page title & favicon
+  useEffect(() => {
+    document.title = 'Breaker HDD Database';
+    const link = document.querySelector("link[rel*='icon']") || document.createElement('link');
+    link.type = 'image/x-icon';
+    link.rel = 'shortcut icon';
+    link.href = 'LOGO BRREAKER_10.png';
+    document.getElementsByTagName('head')[0].appendChild(link);
+  }, []);
+
   const [authMode, setAuthMode] = useState('login');
-  const [authForm, setAuthForm] = useState({ email: '', password: '' });
+  const [authForm, setAuthForm] = useState({ email: '', password: '', confirmPassword: '' });
+  const [authSuccess, setAuthSuccess] = useState('');
   const [authError, setAuthError] = useState('');
   const [isAuthProcessing, setIsAuthProcessing] = useState(false);
 
@@ -282,14 +293,23 @@ export default function App() {
   const handleAuth = async (e) => {
     e.preventDefault();
     setAuthError('');
+    setAuthSuccess('');
+    if (authMode === 'register' && authForm.password !== authForm.confirmPassword) {
+      setAuthError('Konfirmasi password tidak cocok.');
+      return;
+    }
     setIsAuthProcessing(true);
     try {
       if (authMode === 'login') {
         const { error } = await supabase.auth.signInWithPassword({ email: authForm.email, password: authForm.password });
         if (error) throw error;
+        await writeLog(authForm.email, 'LOGIN', `Login berhasil: ${authForm.email}`);
       } else {
         const { error } = await supabase.auth.signUp({ email: authForm.email, password: authForm.password });
         if (error) throw error;
+        setAuthSuccess(`Akun berhasil dibuat! Silakan cek email ${authForm.email} untuk verifikasi sebelum login.`);
+        setAuthMode('login');
+        await writeLog(authForm.email, 'REGISTER', `Pendaftaran akun baru: ${authForm.email}`);
       }
     } catch (err) {
       setAuthError(err.message || 'Autentikasi gagal.');
@@ -313,6 +333,7 @@ export default function App() {
 
   const handleLogout = async () => {
     if (window.confirm('Yakin ingin keluar?')) {
+      if (session?.user?.email) await writeLog(session.user.email, 'LOGOUT', `Logout: ${session.user.email}`);
       await supabase.auth.signOut();
     }
   };
@@ -340,7 +361,7 @@ export default function App() {
   useEffect(() => {
     if (profile?.role !== 'admin') return;
     supabase.from('profiles').select('*').order('created_at').then(({ data }) => { if (data) setUsersList(data); });
-    supabase.from('logs').select('*').order('timestamp', { ascending: false }).limit(200).then(({ data }) => { if (data) setLogs(data); });
+    supabase.from('logs').select('*').order('timestamp', { ascending: false }).limit(500).then(({ data }) => { if (data) setLogs(data); });
   }, [profile?.role]);
 
   // ===================== HDD UPLOAD =====================
@@ -631,6 +652,7 @@ export default function App() {
 
       const folders = Array.from(foldersMap.entries())
         .map(([name, path]) => ({ name, path }))
+        .filter(f => !/^[a-zA-Z]:$/.test(f.name))  // remove bare drive letters like "C:"
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
       setExplorerItems({ folders, files: filesData || [] });
@@ -676,24 +698,35 @@ export default function App() {
     }
   }, []);
 
-  const loadDuplicatesFallback = async (page = 0) => {
-    // Since Supabase doesn't support GROUP BY directly in client,
-    // we fetch a larger chunk and group client-side
-    const { data } = await supabase
-      .from('files')
-      .select('id, hdd_id, hdd_name, name, path, size, date')
-      .gt('size', 0)
-      .order('name')
-      .limit(50000)
-      .range(page * 50000, (page + 1) * 50000 - 1);
-
-    if (!data) return;
-
+  const loadDuplicatesFallback = async () => {
+    // Fetch ALL files in pages and group client-side for accurate duplicate detection
+    const CHUNK = 1000;
     const map = new Map();
-    for (const file of data) {
-      const key = `${file.name.toLowerCase()}|||${file.size}|||${file.date}`;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(file);
+    let offset = 0;
+    let hasMore = true;
+
+    setProcessingMsg('Menganalisis duplikat dari seluruh HDD...');
+
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('files')
+        .select('id, hdd_id, hdd_name, name, path, size, date')
+        .gt('size', 0)
+        .order('id')
+        .range(offset, offset + CHUNK - 1);
+
+      if (error || !data || data.length === 0) { hasMore = false; break; }
+
+      for (const file of data) {
+        const key = `${file.name.toLowerCase()}|||${file.size}|||${file.date}`;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(file);
+      }
+
+      offset += data.length;
+      if (data.length < CHUNK) hasMore = false;
+      // Small delay to avoid hammering the DB
+      await new Promise(r => setTimeout(r, 30));
     }
 
     const groups = [];
@@ -715,13 +748,10 @@ export default function App() {
     }
 
     groups.sort((a, b) => b.wasted - a.wasted);
-    if (page === 0) {
-      setDuplicateGroups(groups);
-      setDuplicateWasted(totalWasted);
-      setDuplicateTotal(groups.length);
-    } else {
-      setDuplicateGroups(prev => [...prev, ...groups]);
-    }
+    setDuplicateGroups(groups);
+    setDuplicateWasted(totalWasted);
+    setDuplicateTotal(groups.length);
+    setProcessingMsg('');
   };
 
   useEffect(() => {
@@ -828,30 +858,32 @@ export default function App() {
 
       setLocalScanName(file.name);
 
-      // Check each file against server in batches
+      // Check files against server - use name+size match
       const results = { duplicates: [], unique: [], wastedSpace: 0 };
-      const BATCH = 50;
-
+      // Process sequentially in small batches to avoid rate limits
+      const BATCH = 10;
       for (let i = 0; i < parsed.length; i += BATCH) {
         const chunk = parsed.slice(i, i + BATCH);
-        const checks = await Promise.all(chunk.map(async (lf) => {
-          if (!lf.size) return { local: lf, found: [] };
-          const { data } = await supabase.from('files')
-            .select('id, hdd_name, path, name')
-            .ilike('name', lf.name)
-            .eq('size', lf.size)
-            .limit(3);
-          return { local: lf, found: data || [] };
-        }));
-
-        checks.forEach(({ local, found }) => {
-          if (found.length > 0) {
-            results.duplicates.push({ local, cloud: found });
-            results.wastedSpace += local.size;
-          } else {
-            results.unique.push(local);
+        for (const lf of chunk) {
+          if (!lf.size || !lf.name) { results.unique.push(lf); continue; }
+          try {
+            const { data } = await supabase.from('files')
+              .select('id, hdd_name, path, name')
+              .eq('name', lf.name)
+              .eq('size', lf.size)
+              .limit(3);
+            if (data && data.length > 0) {
+              results.duplicates.push({ local: lf, cloud: data });
+              results.wastedSpace += lf.size;
+            } else {
+              results.unique.push(lf);
+            }
+          } catch (e) {
+            results.unique.push(lf);
           }
-        });
+        }
+        // Small delay between batches to avoid rate limit
+        if (i + BATCH < parsed.length) await new Promise(r => setTimeout(r, 50));
       }
 
       results.duplicates.sort((a, b) => b.local.size - a.local.size);
@@ -895,9 +927,33 @@ export default function App() {
         else if (pLower.endsWith(' - von')) category = 'Visual';
         else if (pLower.endsWith(' - isadaya')) category = 'Isadaya';
 
-        const matches = allPaths.filter(p => p.toLowerCase().includes(pLower));
-        matches.sort((a, b) => a.length - b.length);
-        const bestMatch = matches[0] || null;
+        // Strip category suffix for matching (e.g. "Project A - Video" -> "project a")
+        const cleanName = pLower
+          .replace(/ - video$/, '').replace(/ - von$/, '')
+          .replace(/ - isadaya$/, '').replace(/ - breaker$/, '').trim();
+
+        // Try multiple matching strategies
+        let bestMatch = null;
+
+        // Strategy 1: exact clean name in path
+        const exact = allPaths.filter(p => p.toLowerCase().includes(cleanName));
+        if (exact.length > 0) {
+          exact.sort((a, b) => a.length - b.length);
+          bestMatch = exact[0];
+        }
+
+        // Strategy 2: all words present in path (handles word-order differences)
+        if (!bestMatch) {
+          const words = cleanName.split(/[\s\-_]+/).filter(w => w.length > 2);
+          const wordMatch = allPaths.filter(p => {
+            const pl = p.toLowerCase();
+            return words.every(w => pl.includes(w));
+          });
+          if (wordMatch.length > 0) {
+            wordMatch.sort((a, b) => a.length - b.length);
+            bestMatch = wordMatch[0];
+          }
+        }
 
         return { name: project, category, isFound: !!bestMatch, foundPath: bestMatch };
       });
@@ -974,6 +1030,12 @@ export default function App() {
             </div>
           )}
 
+          {authSuccess && (
+            <div className="bg-emerald-500/20 border border-emerald-500/50 text-emerald-400 p-3 rounded-lg mb-4 text-sm flex items-start gap-2">
+              <CheckSquare size={16} className="shrink-0 mt-0.5" /><span>{authSuccess}</span>
+            </div>
+          )}
+
           <form onSubmit={handleAuth} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Email</label>
@@ -998,7 +1060,30 @@ export default function App() {
                 </div>
               )}
             </div>
-            <button type="submit" disabled={isAuthProcessing}
+
+            {authMode === 'register' && (
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Konfirmasi Kata Sandi</label>
+                <div className="relative">
+                  <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input type="password" required minLength={6} value={authForm.confirmPassword}
+                    onChange={e => setAuthForm({ ...authForm, confirmPassword: e.target.value })}
+                    className={`w-full bg-slate-900 border rounded-xl py-3 pl-10 pr-4 text-white text-sm focus:border-indigo-500 outline-none transition-all ${authForm.confirmPassword && authForm.password !== authForm.confirmPassword ? 'border-red-500' : 'border-slate-700'}`}
+                    placeholder="Ketik ulang kata sandi" />
+                </div>
+                {authForm.confirmPassword && authForm.password !== authForm.confirmPassword && (
+                  <p className="text-red-400 text-xs mt-1">Kata sandi tidak cocok</p>
+                )}
+                <div className="mt-2 p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg">
+                  <p className="text-xs text-indigo-300 flex items-start gap-2">
+                    <Info size={14} className="shrink-0 mt-0.5" />
+                    Setelah daftar, cek email kamu untuk link verifikasi. Akun baru otomatis mendapat role <strong>Viewer</strong>. Admin bisa mengubah role di tab Manajemen Akun.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <button type="submit" disabled={isAuthProcessing || (authMode === 'register' && authForm.password !== authForm.confirmPassword)}
               className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors text-sm disabled:opacity-50 flex items-center justify-center gap-2 mt-2">
               {isAuthProcessing && <Loader2 size={18} className="animate-spin" />}
               {authMode === 'login' ? 'Masuk ke Database' : 'Daftar Akun Baru'}
@@ -1006,7 +1091,7 @@ export default function App() {
           </form>
 
           <div className="mt-6 text-center">
-            <button onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError(''); }}
+            <button onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError(''); setAuthSuccess(''); setAuthForm({ email: '', password: '', confirmPassword: '' }); }}
               className="text-sm text-slate-400 hover:text-white transition-colors">
               {authMode === 'login' ? 'Belum punya akun? Daftar di sini.' : 'Sudah punya akun? Masuk di sini.'}
             </button>
@@ -1976,7 +2061,7 @@ export default function App() {
                             <td className="px-6 py-4 text-slate-400 text-xs">{new Date(log.timestamp).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</td>
                             <td className="px-6 py-4 font-medium text-slate-300 text-sm">{log.user_email}</td>
                             <td className="px-6 py-4">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${log.action?.includes('DELETE') ? 'bg-red-500/20 text-red-400' : log.action?.includes('UPLOAD') ? 'bg-blue-500/20 text-blue-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${log.action?.includes('DELETE') ? 'bg-red-500/20 text-red-400' : log.action === 'LOGIN' ? 'bg-sky-500/20 text-sky-400' : log.action === 'LOGOUT' ? 'bg-slate-500/20 text-slate-400' : log.action === 'REGISTER' ? 'bg-purple-500/20 text-purple-400' : log.action?.includes('UPLOAD') || log.action?.includes('REPLACE') ? 'bg-blue-500/20 text-blue-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
                                 {log.action?.replace(/_/g, ' ')}
                               </span>
                             </td>
