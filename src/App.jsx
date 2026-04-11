@@ -182,11 +182,22 @@ export default function App() {
   // Set page title & favicon
   useEffect(() => {
     document.title = 'Breaker HDD Database';
-    const link = document.querySelector("link[rel*='icon']") || document.createElement('link');
-    link.type = 'image/x-icon';
-    link.rel = 'shortcut icon';
-    link.href = 'LOGO BRREAKER_10.png';
-    document.getElementsByTagName('head')[0].appendChild(link);
+    // Remove existing favicons
+    document.querySelectorAll("link[rel*='icon']").forEach(el => el.remove());
+    // Try PNG logo first
+    const link = document.createElement('link');
+    link.rel = 'icon';
+    link.type = 'image/png';
+    link.href = '/LOGO BRREAKER_10.png';
+    link.onerror = () => {
+      // Fallback: SVG favicon with "B" letter
+      const svgFavicon = document.createElement('link');
+      svgFavicon.rel = 'icon';
+      svgFavicon.type = 'image/svg+xml';
+      svgFavicon.href = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%234f46e5'/><text y='.9em' font-size='70' x='50%' text-anchor='middle' font-family='Arial' font-weight='bold' fill='white'>B</text></svg>";
+      document.head.appendChild(svgFavicon);
+    };
+    document.head.appendChild(link);
   }, []);
 
   const [authMode, setAuthMode] = useState('login');
@@ -344,10 +355,12 @@ export default function App() {
     fetchHdds();
   }, [session]);
 
+  const naturalSort = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+
   const fetchHdds = async () => {
     setIsHddsLoading(true);
-    const { data, error } = await supabase.from('hdds').select('*').order('name');
-    if (!error && data) setHdds(data);
+    const { data, error } = await supabase.from('hdds').select('*');
+    if (!error && data) setHdds([...data].sort(naturalSort));
     setIsHddsLoading(false);
   };
 
@@ -613,47 +626,53 @@ export default function App() {
     setIsExplorerLoading(true);
 
     try {
-      // Get paths for this HDD (cached)
+      // Get paths for this HDD (cached) - strip drive letters from paths
       let allPaths = explorerPathsCache.current.get(hddId);
       if (!allPaths) {
         const { data } = await supabase.from('files').select('path').eq('hdd_id', hddId);
-        allPaths = [...new Set((data || []).map(r => r.path))];
+        // Normalize: strip leading drive letter (e.g. "C:\folder" -> "folder")
+        const normalizePath = (p) => {
+          if (!p) return '';
+          return p.replace(/^[a-zA-Z]:\\?/, '').replace(/^[a-zA-Z]:\//, '').replace(/\\$/, '').replace(/\/$/, '');
+        };
+        allPaths = [...new Set((data || []).map(r => normalizePath(r.path)))].filter(Boolean);
         explorerPathsCache.current.set(hddId, allPaths);
       }
 
-      const hdd = hdds.find(h => h.id === hddId);
-      const hddName = hdd?.name || '';
-      const normPath = path ? path : '';
+      const normPath = path ? path.replace(/^[a-zA-Z]:\\?/, '') : '';
       const prefix = normPath ? normPath + '\\' : '';
 
-      // Build folder list
+      // Build folder list from normalized paths
       const foldersMap = new Map();
       for (const p of allPaths) {
-        const vPath = normPath === '' ? p : (p === normPath || p.startsWith(prefix) ? p : null);
-        if (vPath === null) continue;
-        if (p === normPath) continue;
-        if (normPath === '' || p.startsWith(prefix)) {
+        if (normPath === '' || p.startsWith(prefix) || p === normPath) {
+          if (p === normPath) continue;
           const remaining = normPath ? p.substring(normPath.length + 1) : p;
+          if (!remaining) continue;
           const nextFolder = remaining.split('\\')[0];
           if (nextFolder && !foldersMap.has(nextFolder)) {
-            const fPath = normPath ? `${normPath}\\${nextFolder}` : nextFolder;
+            const fPath = normPath ? normPath + '\\' + nextFolder : nextFolder;
             foldersMap.set(nextFolder, fPath);
           }
         }
       }
 
-      // Get files in current path
-      const { data: filesData } = await supabase.from('files')
+      // Get files - try both normalized and original path format
+      const normalizePath2 = (p) => {
+        if (!p) return '';
+        return p.replace(/^[a-zA-Z]:\\?/, '').replace(/^[a-zA-Z]:\//, '').replace(/\\$/, '');
+      };
+      const { data: allFilesInHdd } = await supabase.from('files')
         .select('id, hdd_id, hdd_name, name, path, size, date')
         .eq('hdd_id', hddId)
-        .eq('path', normPath)
         .order('name')
-        .limit(500);
+        .limit(2000);
+      
+      const filesData = (allFilesInHdd || []).filter(f => normalizePath2(f.path) === normPath);
 
       const folders = Array.from(foldersMap.entries())
         .map(([name, path]) => ({ name, path }))
-        .filter(f => !/^[a-zA-Z]:$/.test(f.name))  // remove bare drive letters like "C:"
-        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 
       setExplorerItems({ folders, files: filesData || [] });
     } catch (err) {
@@ -672,6 +691,8 @@ export default function App() {
   // ===================== DUPLICATES (SERVER-SIDE) =====================
   const loadDuplicates = useCallback(async (page = 0) => {
     setIsLoadingDuplicates(true);
+    setIsProcessing(true);
+    setProcessingMsg('Menganalisis duplikat dari semua HDD...');
     try {
       const from = page * PAGE_SIZE;
       const { data, error } = await supabase.rpc('get_duplicates', { p_limit: PAGE_SIZE, p_offset: from });
@@ -695,38 +716,39 @@ export default function App() {
       await loadDuplicatesFallback(page);
     } finally {
       setIsLoadingDuplicates(false);
+      setIsProcessing(false);
+      setProcessingMsg('');
     }
   }, []);
 
   const loadDuplicatesFallback = async () => {
-    // Fetch ALL files in pages and group client-side for accurate duplicate detection
     const CHUNK = 1000;
     const map = new Map();
     let offset = 0;
     let hasMore = true;
-
-    setProcessingMsg('Menganalisis duplikat dari seluruh HDD...');
+    const totalFilesCount = hdds.reduce((a, h) => a + (h.file_count || 0), 0);
 
     while (hasMore) {
       const { data, error } = await supabase
         .from('files')
         .select('id, hdd_id, hdd_name, name, path, size, date')
         .gt('size', 0)
-        .order('id')
         .range(offset, offset + CHUNK - 1);
 
       if (error || !data || data.length === 0) { hasMore = false; break; }
 
       for (const file of data) {
-        const key = `${file.name.toLowerCase()}|||${file.size}|||${file.date}`;
+        // Key: name (lowercase) + size + date — more accurate for camera files
+        const key = `${file.name.toLowerCase()}|||${file.size}|||${(file.date || '').trim()}`;
         if (!map.has(key)) map.set(key, []);
         map.get(key).push(file);
       }
 
       offset += data.length;
       if (data.length < CHUNK) hasMore = false;
-      // Small delay to avoid hammering the DB
-      await new Promise(r => setTimeout(r, 30));
+      const pct = totalFilesCount > 0 ? Math.round((offset / totalFilesCount) * 100) : 0;
+      setProcessingMsg(`Menganalisis duplikat: ${offset.toLocaleString()} / ${totalFilesCount.toLocaleString()} file (${pct}%)`);
+      await new Promise(r => setTimeout(r, 15));
     }
 
     const groups = [];
@@ -851,39 +873,58 @@ export default function App() {
     const file = e.target.files[0];
     if (!file) return;
     setIsCheckingLocal(true);
+    setIsProcessing(true);
+    setProcessingMsg('Membaca file scan lokal...');
     try {
       const text = await file.text();
       const parsed = parseHTML(text);
       if (parsed.length === 0) { alert('File kosong.'); return; }
 
       setLocalScanName(file.name);
+      setProcessingMsg('Mengunduh daftar file dari server...');
 
-      // Check files against server - use name+size match
-      const results = { duplicates: [], unique: [], wastedSpace: 0 };
-      // Process sequentially in small batches to avoid rate limits
-      const BATCH = 10;
-      for (let i = 0; i < parsed.length; i += BATCH) {
-        const chunk = parsed.slice(i, i + BATCH);
-        for (const lf of chunk) {
-          if (!lf.size || !lf.name) { results.unique.push(lf); continue; }
-          try {
-            const { data } = await supabase.from('files')
-              .select('id, hdd_name, path, name')
-              .eq('name', lf.name)
-              .eq('size', lf.size)
-              .limit(3);
-            if (data && data.length > 0) {
-              results.duplicates.push({ local: lf, cloud: data });
-              results.wastedSpace += lf.size;
-            } else {
-              results.unique.push(lf);
-            }
-          } catch (e) {
-            results.unique.push(lf);
-          }
+      // Download ALL server files into a local Map (name_size -> matches)
+      // This is much faster than one query per file
+      const serverMap = new Map(); // key: "name|||size" -> array of matches
+      let offset = 0;
+      const CHUNK = 1000;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('files')
+          .select('id, hdd_name, path, name, size')
+          .gt('size', 0)
+          .range(offset, offset + CHUNK - 1);
+        
+        if (error || !data || data.length === 0) { hasMore = false; break; }
+        
+        for (const sf of data) {
+          const key = `${sf.name.toLowerCase()}|||${sf.size}`;
+          if (!serverMap.has(key)) serverMap.set(key, []);
+          serverMap.get(key).push(sf);
         }
-        // Small delay between batches to avoid rate limit
-        if (i + BATCH < parsed.length) await new Promise(r => setTimeout(r, 50));
+        
+        offset += data.length;
+        if (data.length < CHUNK) hasMore = false;
+        setProcessingMsg(`Mengunduh data server: ${offset.toLocaleString()} file...`);
+        await new Promise(r => setTimeout(r, 10));
+      }
+
+      setProcessingMsg('Mencocokkan data...');
+
+      // Compare local files against server map
+      const results = { duplicates: [], unique: [], wastedSpace: 0 };
+      for (const lf of parsed) {
+        if (!lf.size || !lf.name) { results.unique.push(lf); continue; }
+        const key = `${lf.name.toLowerCase()}|||${lf.size}`;
+        const found = serverMap.get(key);
+        if (found && found.length > 0) {
+          results.duplicates.push({ local: lf, cloud: found });
+          results.wastedSpace += lf.size;
+        } else {
+          results.unique.push(lf);
+        }
       }
 
       results.duplicates.sort((a, b) => b.local.size - a.local.size);
@@ -893,6 +934,8 @@ export default function App() {
       alert('Gagal: ' + err.message);
     } finally {
       setIsCheckingLocal(false);
+      setIsProcessing(false);
+      setProcessingMsg('');
       if (localFileInputRef.current) localFileInputRef.current.value = '';
     }
   };
@@ -900,6 +943,7 @@ export default function App() {
   // ===================== AUDIT SHEET =====================
   const handleAuditSheet = async () => {
     setIsAuditing(true);
+    setIsProcessing(true);
     setAuditData(null);
     try {
       const res = await fetch(FIXED_SHEET_URL);
@@ -916,9 +960,29 @@ export default function App() {
           return true;
         });
 
-      // Get all distinct paths from DB
-      const { data: pathData } = await supabase.from('files').select('path, hdd_name').limit(100000);
-      const allPaths = [...new Set((pathData || []).map(r => `${r.hdd_name}\\${r.path}`))];
+      // Fetch ALL paths from DB via pagination - no limit cap
+      const normPathForAudit = (p) => (p || '').replace(/^[a-zA-Z]:\\?/, '').replace(/^[a-zA-Z]:\//, '');
+      const allPathsSet = new Set();
+      let auditOffset = 0;
+      const AUDIT_CHUNK = 5000;
+      let auditHasMore = true;
+      setProcessingMsg('Mengunduh data jalur folder dari server...');
+
+      while (auditHasMore) {
+        const { data: pd } = await supabase
+          .from('files')
+          .select('path, hdd_name')
+          .range(auditOffset, auditOffset + AUDIT_CHUNK - 1);
+        if (!pd || pd.length === 0) { auditHasMore = false; break; }
+        pd.forEach(r => {
+          if (r.path) allPathsSet.add(`${r.hdd_name}\\${normPathForAudit(r.path)}`);
+        });
+        auditOffset += pd.length;
+        if (pd.length < AUDIT_CHUNK) auditHasMore = false;
+        await new Promise(r => setTimeout(r, 20));
+      }
+      const allPaths = [...allPathsSet];
+      setProcessingMsg('');
 
       const processedRows = rows.map(project => {
         const pLower = project.toLowerCase();
@@ -963,6 +1027,8 @@ export default function App() {
       alert('Gagal: ' + err.message);
     } finally {
       setIsAuditing(false);
+      setIsProcessing(false);
+      setProcessingMsg('');
     }
   };
 
@@ -1074,12 +1140,7 @@ export default function App() {
                 {authForm.confirmPassword && authForm.password !== authForm.confirmPassword && (
                   <p className="text-red-400 text-xs mt-1">Kata sandi tidak cocok</p>
                 )}
-                <div className="mt-2 p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg">
-                  <p className="text-xs text-indigo-300 flex items-start gap-2">
-                    <Info size={14} className="shrink-0 mt-0.5" />
-                    Setelah daftar, cek email kamu untuk link verifikasi. Akun baru otomatis mendapat role <strong>Viewer</strong>. Admin bisa mengubah role di tab Manajemen Akun.
-                  </p>
-                </div>
+
               </div>
             )}
 
